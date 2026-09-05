@@ -170,6 +170,10 @@ const server = createServer(async function (req, res) {
     return send(res, 200, {
       configured: !!config.apiKey,
       provider: provider,
+      // a key from .env has no provider name; the panel must not silently
+      // preselect a preset whose Save would overwrite a working setup
+      fromEnv: !!config.apiKey && !provider,
+      baseUrl: config.baseUrl,
       keyHint: maskKey(config.apiKey),
       providers: Object.keys(PROVIDER_PRESETS).map(function (id) {
         return { id: id, label: PROVIDER_PRESETS[id].label, keysUrl: PROVIDER_PRESETS[id].keysUrl };
@@ -181,8 +185,16 @@ const server = createServer(async function (req, res) {
     if (!originOk(req)) return send(res, 403, { error: "cross-origin config writes are refused" });
     try {
       const body = await readJson(req);
-      const preset = PROVIDER_PRESETS[body.provider];
-      const baseUrl = preset ? preset.baseUrl : String(body.baseUrl || "").trim();
+      const named = PROVIDER_PRESETS[body.provider];
+      // no preset and no URL means "test whatever is loaded right now", which
+      // is how a key that came from .env gets checked without being replaced
+      const baseUrl = named ? named.baseUrl : (String(body.baseUrl || "").trim() || config.baseUrl);
+      // a .env or custom endpoint pointing at a provider we know still gets its
+      // verified flags - otherwise the deepseek models come back unflagged
+      const trimmed = baseUrl.replace(/\/+$/, "");
+      const preset = named || Object.keys(PROVIDER_PRESETS)
+        .map(function (k) { return PROVIDER_PRESETS[k]; })
+        .find(function (p) { return p.baseUrl.replace(/\/+$/, "") === trimmed; });
       if (!/^https?:\/\//i.test(baseUrl)) return send(res, 400, { error: "a base URL starting with http:// or https:// is required" });
       // an empty key means "test the one already saved"
       const apiKey = typeof body.apiKey === "string" && body.apiKey.trim() ? body.apiKey.trim() : config.apiKey;

@@ -89,7 +89,7 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
     setKeyError("");
     setTested(null);
     try {
-      setTested(await ai.agent.test({ provider: providerId === "custom" ? "" : providerId, baseUrl, apiKey: keyDraft }));
+      setTested(await ai.agent.test({ provider: providerId === "custom" || providerId === "env" ? "" : providerId, baseUrl, apiKey: keyDraft }));
     } catch (e) {
       setKeyError(e.message);
     } finally {
@@ -102,7 +102,7 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
     setKeyError("");
     try {
       const r = await ai.agent.setup({
-        provider: providerId === "custom" ? "" : providerId,
+        provider: providerId === "custom" || providerId === "env" ? "" : providerId,
         apiKey: keyDraft,
         baseUrl: tested ? tested.baseUrl : "",
         models: tested ? tested.models : undefined,
@@ -194,9 +194,16 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
     tutor: ["teach me how transformers work", "I want to learn system design basics", "explain TCP handshakes to me step by step"],
   }[mode];
   const visionModels = (models || []).filter((m) => m.vision);
-  const providers = ((status && status.providers) || []).concat([{ id: "custom", label: "Other (OpenAI-compatible)" }]);
+  // A key from bridge/.env has no preset behind it, so it gets its own entry:
+  // without one the picker would show whichever preset happens to be first and
+  // Save would quietly swap a working endpoint for that one.
+  const fromEnv = !!(status && status.fromEnv);
+  const providers = (fromEnv ? [{ id: "env", label: "From bridge/.env" }] : [])
+    .concat((status && status.providers) || [])
+    .concat([{ id: "custom", label: "Other (OpenAI-compatible)" }]);
   const activeProvider = providerDraft || (status && status.provider) || (providers[0] && providers[0].id) || "";
   const isCustom = activeProvider === "custom";
+  const isEnv = activeProvider === "env";
   const keysUrl = (providers.find((p) => p.id === activeProvider) || {}).keysUrl || "";
   const savedProviderLabel = (providers.find((p) => p.id === (status && status.provider)) || {}).label || "";
   // switching provider with a key already saved reuses it; the server keeps the
@@ -204,8 +211,9 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
   const hasKey = !!keyDraft.trim() || !!(status && status.configured);
   const canTest = !keyBusy && hasKey && (!isCustom || /^https?:\/\//i.test(baseUrlDraft.trim()));
   // a custom endpoint must be tested first - that test is where its model list
-  // comes from, since there is no preset to fall back on
-  const canSaveKey = !keyBusy && hasKey && (tested ? true : !isCustom);
+  // comes from, since there is no preset to fall back on. The .env entry is
+  // testable but never saveable: saving it would mean picking a preset for it.
+  const canSaveKey = !keyBusy && hasKey && !isEnv && (tested ? true : !isCustom);
   const needsKey = !!status && !status.configured;
   const testedVision = tested ? tested.models.filter((m) => m.vision).length : 0;
   const testedReasoning = tested ? tested.models.filter((m) => m.reasoning).length : 0;
@@ -246,14 +254,19 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
           <label className="ai-sidebar__field">
             <span>Provider</span>
             <small>
-              {status && status.configured
-                ? "Key saved for " + (savedProviderLabel || status.provider) + " · " + status.keyHint
-                : "Your key is stored on this machine and only ever sent to the provider."}
+              {!status || !status.configured
+                ? "Your key is stored on this machine and only ever sent to the provider."
+                : fromEnv
+                  ? "Using the key in bridge/.env · " + status.keyHint + ". Pick a provider below to set one from here instead."
+                  : "Key saved for " + (savedProviderLabel || status.provider) + " · " + status.keyHint}
             </small>
             <select value={activeProvider} onChange={(e) => { setProviderDraft(e.target.value); setTested(null); setKeyError(""); }} disabled={keyBusy || !providers.length}>
               {providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
           </label>
+          {isEnv && status.baseUrl && (
+            <p className="ai-sidebar__hint">Endpoint: <code>{status.baseUrl}</code>. Test connection checks this key and lists what it serves.</p>
+          )}
           {isCustom && (
             <label className="ai-sidebar__field">
               <span>Endpoint</span>
@@ -315,7 +328,7 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
                   ? "No vision model here, so Refine and the capture tool will be unavailable."
                   : testedVision + " can see images. "}
                 {testedReasoning > 0 && testedReasoning + " look like reasoning models and get a 32k output budget."}
-                {" Save to use this list."}
+                {canSaveKey ? " Save to use this list." : isEnv ? " Pick a provider above to switch away from .env." : ""}
               </p>
             </div>
           )}
