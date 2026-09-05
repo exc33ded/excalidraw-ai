@@ -99,11 +99,12 @@ Stop button (the server aborts the upstream fetch on request close), and a
 callback that shows the running tool name. Each user message also carries the
 selection ids + bbox and the viewport (scroll, zoom).
 
-**State that survives a refresh** (all `localStorage`): panel width, model
-choice, transcript (`excalidraw-ai-chat`), agent history
-(`excalidraw-ai-agent-messages`, system prompt rebuilt from source on load,
-screenshots replaced by a marker), and the scene itself (`excalidraw-ai-scene`,
-debounced `onChange` → `initialData`). History is trimmed to ~120k chars by
+**State that survives a refresh.** Per-machine preferences stay in
+`localStorage`: panel width, model choice, and which chat was last open
+(`excalidraw-ai-active`). Everything that belongs to a *conversation* lives in
+the bridge's chat store instead (`bridge/store.mjs`, doc below): the display
+transcript, the agent history (system prompt rebuilt from source on load,
+screenshots replaced by a marker), and the canvas. History is trimmed to ~120k chars by
 dropping the oldest turns whole (`trimMessages`); Stop cuts back to the last
 complete turn (`dropIncompleteTurn`) so no `tool_calls` is ever sent without
 its results. Side effect: Stop pressed while the model is thinking *after* a
@@ -385,13 +386,34 @@ render assistant text as it arrives. Deliberately skipped: the DeepSeek models
 are reasoning models and emit their content at the very end, so streaming buys
 little today. Revisit when a non-reasoning model is on the allowlist.
 
-### 3. Storage beyond localStorage
+### 3. Chat history and per-chat canvases
 
-Scene and chat persist per browser. `localStorage` is ~5 MB; a canvas with
-embedded images will exceed it and the save silently skips (there is a
-`ponytail:` comment in `App.jsx`). IndexedDB, or a server-side session, is the
-upgrade. History trimming is by character count, not tokens; summarising old
-turns instead of dropping them is the next refinement.
+Done. Every conversation is a chat, and every chat owns a canvas:
+`bridge/store.mjs` keeps one directory per chat under
+`~/.excalidraw-ai/chats/<id>/` (override with `AI_DATA_DIR`), holding
+`meta.json`, `chat.json` (display log + model transcript), `scene.json` and
+`files.json`. The parts are written separately because their rates differ by
+orders of magnitude - the scene is saved on a 500 ms debounce while you draw,
+the image blobs only when an image is added. Writes go through a `.tmp` +
+`rename`, so a crash mid-save leaves the previous version intact.
+
+`GET|POST /api/chats` and `GET|PUT|DELETE /api/chats/:id` are the routes;
+`originOk` guards them all, reads included - under the default `*` CORS an
+unguarded GET would let any page the user has open read their diagrams. As with
+the config writes, a request with no `Origin` at all is treated as a local
+non-browser client and allowed through, so the routes are closed to other
+pages, not to `curl` on the same machine. The
+panel's chat list is the hamburger in the sidebar header. Switching chats calls
+`updateScene` **plus** `addFiles` (updateScene does not carry files) and
+`ai.agent.load()`, which swaps the model's own transcript and clears the revert
+snapshot - miss that and the next turn answers with the previous chat's
+history. On first run the old single-canvas `localStorage` keys are migrated
+into chat #1 and removed.
+
+Not done: search across chats (that is when `node:sqlite` starts to pay for
+itself - it needs Node >= 22.13 and `package.json` declares >= 20.12), export /
+import, and folders. History trimming is still by character count, not tokens;
+summarising old turns instead of dropping them is the next refinement.
 
 ### 4. Hardening beyond localhost
 
@@ -458,7 +480,7 @@ groups and frames before rendering.
   (excalidraw, toon, mermaid-to-excalidraw). This bites every time.
 - API keys stay server-side. The browser only ever talks to `/api/*`.
 - `ponytail:` comments mark deliberate shortcuts and name their upgrade path —
-  there is one on label re-wrap and one on the localStorage scene save.
+  there is one on label re-wrap and one on the JSON-file chat store.
 - `browser-test.mjs` is the second test layer: anything that needs the DOM,
   the live API, or Excalidraw's event handling goes there, not in `test.mjs`.
 - The panel is Excalidraw's own Sidebar, so it has whatever Excalidraw gives

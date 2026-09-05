@@ -520,3 +520,51 @@
   border-radius: var(--border-radius-lg);
   padding: 0.05rem 0.35rem;
 }
+
+/* chat history: one row per stored conversation, each with its own canvas */
+.ai-sidebar__chats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+}
+.ai-sidebar__chatrow {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.ai-sidebar__chatopen {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font: inherit;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: var(--border-radius-lg);
+  background: var(--color-surface-low);
+  color: var(--color-on-surface);
+  cursor: pointer;
+}
+.ai-sidebar__chatopen:hover:not(:disabled) {
+  background: var(--color-surface-high);
+}
+.ai-sidebar__chatrow--on .ai-sidebar__chatopen {
+  border-color: var(--color-primary);
+}
+.ai-sidebar__chatname {
+  font-size: 0.8125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-sidebar__chatdate {
+  font-size: 0.6875rem;
+  color: var(--color-gray-60);
+}
+.theme--dark .ai-sidebar__chatdate {
+  color: var(--color-gray-40);
+}

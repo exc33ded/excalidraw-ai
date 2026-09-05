@@ -75,11 +75,13 @@ check("history has no orphaned tool call after stop", !(last.role === "tool") &&
 // a real turn: create then rename, then revert
 await page.click(".ai-sidebar__input");
 await page.type(".ai-sidebar__input", "add two rectangles labeled Start and End and connect them with an arrow");
+// the scene lives in the bridge's chat store now, under whichever chat is open
+const savedScene = () => page.evaluate(() => window.ai.chats.read(localStorage.getItem("excalidraw-ai-active")).then((r) => r.scene));
 await page.keyboard.press("Enter");
 await page.waitForFunction(() => !document.querySelector(".ai-sidebar__stop"), { timeout: 240000 });
-let scene = await page.evaluate(() => JSON.parse(localStorage.getItem("excalidraw-ai-scene") || "{}"));
+let scene = await savedScene();
 await sleep(800);
-scene = await page.evaluate(() => JSON.parse(localStorage.getItem("excalidraw-ai-scene") || "{}"));
+scene = await savedScene();
 const els = scene.elements || [];
 check("turn created elements (saved scene)", els.length >= 3);
 check("labels are bound text, arrow bound", els.some((e) => e.type === "text" && e.containerId) && els.some((e) => e.type === "arrow" && e.startBinding));
@@ -91,7 +93,7 @@ await page.type(".ai-sidebar__input", "rename the box labeled Start to Begin");
 await page.keyboard.press("Enter");
 await page.waitForFunction(() => !document.querySelector(".ai-sidebar__stop"), { timeout: 240000 });
 await sleep(800);
-scene = await page.evaluate(() => JSON.parse(localStorage.getItem("excalidraw-ai-scene") || "{}"));
+scene = await savedScene();
 check("rename changed the bound label", (scene.elements || []).some((e) => e.type === "text" && e.containerId && e.text === "Begin"));
 
 // refresh keeps chat and canvas
@@ -100,7 +102,7 @@ await page.reload({ waitUntil: "networkidle0" });
 await page.waitForSelector(".ai-sidebar__msg");
 check("chat survives refresh", (await page.$$eval(".ai-sidebar__msg", (m) => m.length)) === before);
 await sleep(800);
-const after = await page.evaluate(() => JSON.parse(localStorage.getItem("excalidraw-ai-scene") || "{}").elements.length);
+const after = (await savedScene()).elements.length;
 check("canvas survives refresh", after === scene.elements.length);
 
 // revert turn
@@ -109,12 +111,12 @@ await page.type(".ai-sidebar__input", "add a diamond labeled Check below End");
 await page.keyboard.press("Enter");
 await page.waitForFunction(() => !document.querySelector(".ai-sidebar__stop"), { timeout: 240000 });
 await sleep(800);
-const withDiamond = await page.evaluate(() => JSON.parse(localStorage.getItem("excalidraw-ai-scene")).elements.length);
+const withDiamond = (await savedScene()).elements.length;
 const revertBtn = await page.$('button[title="Revert the last turn"]');
 check("revert button present", revertBtn !== null);
 await revertBtn.click();
 await sleep(800);
-const reverted = await page.evaluate(() => JSON.parse(localStorage.getItem("excalidraw-ai-scene")).elements.length);
+const reverted = (await savedScene()).elements.length;
 check("revert restores pre-turn element count", withDiamond > reverted && reverted === after);
 
 // create_diagram in a real browser (mermaid needs a DOM)
@@ -123,7 +125,7 @@ await page.type(".ai-sidebar__input", "create a flowchart of a CI pipeline: lint
 await page.keyboard.press("Enter");
 await page.waitForFunction(() => !document.querySelector(".ai-sidebar__stop"), { timeout: 300000 });
 await sleep(800);
-const diag = await page.evaluate(() => JSON.parse(localStorage.getItem("excalidraw-ai-scene")).elements);
+const diag = (await savedScene()).elements;
 check("create_diagram produced bound arrows", diag.filter((e) => e.type === "arrow" && e.startBinding && e.endBinding).length >= 3);
 
 // wheel over the chat must not zoom or pan the canvas
@@ -134,6 +136,34 @@ await page.keyboard.down("Control"); await page.mouse.wheel({ deltaY: -300 }); a
 await sleep(300);
 const zoomAfter = await page.$eval(".zoom-actions, [data-testid=zoom-actions], .App-bottom-bar", (el) => el.textContent);
 check("wheel over the chat does not zoom the canvas", zoomBefore === zoomAfter);
+
+// chat history: each chat owns a canvas, and the swap has to take the model's
+// transcript with it or the next turn answers with the previous chat's history
+const activeChat = () => page.evaluate(() => localStorage.getItem("excalidraw-ai-active"));
+const liveIds = () => page.evaluate(() => window.excalidrawAPI.getSceneElements().filter((e) => !e.isDeleted).map((e) => e.id));
+const openHistory = async () => {
+  await page.evaluate(() => document.querySelector('[aria-label="Chats"]').click());
+  await page.waitForSelector(".ai-sidebar__chatrow");
+};
+const idA = await activeChat();
+const drawnA = await liveIds();
+await openHistory();
+await page.evaluate(() => [...document.querySelectorAll(".ai-sidebar__suggest")].find((b) => b.textContent.includes("New chat")).click());
+await sleep(1000);
+const idB = await activeChat();
+check("a new chat opens on an empty canvas", idB !== idA && (await liveIds()).length === 0);
+check("a new chat starts with no messages", (await page.$$(".ai-sidebar__msg")).length === 0);
+check("a new chat starts with an empty transcript", (await page.evaluate((id) => window.ai.chats.read(id).then((r) => r.chat.messages.length), idB)) === 0);
+await openHistory();
+check("both chats are listed", (await page.$$(".ai-sidebar__chatrow")).length === 2);
+await page.evaluate(() => [...document.querySelectorAll(".ai-sidebar__chatrow")].find((r) => !r.className.includes("--on")).querySelector(".ai-sidebar__chatopen").click());
+await sleep(1000);
+check("switching back restores that chat's canvas", (await activeChat()) === idA && (await liveIds()).join() === drawnA.join());
+check("the chat left behind kept its empty canvas", (await page.evaluate((id) => window.ai.chats.read(id).then((r) => r.scene.elements.filter((e) => !e.isDeleted).length), idB)) === 0);
+await openHistory();
+await page.evaluate(() => document.querySelector(".ai-sidebar__chatrow--on [aria-label^='Delete']").click());
+await sleep(1200);
+check("deleting the open chat opens the remaining one", (await activeChat()) === idB);
 
 console.log("\n" + pass + " passed, " + fail + " failed");
 if (errors.length) console.log("page errors:\n" + errors.join("\n"));

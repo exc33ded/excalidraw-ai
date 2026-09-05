@@ -3,7 +3,8 @@
 An AI agent inside Excalidraw. A chat sidebar that reads and edits the live
 canvas through tools, generates whole diagrams from text via mermaid, cleans up
 hand-drawn sketches with a vision model, and can act as an assistant, a
-planning guide, or a step-by-step tutor.
+planning guide, or a step-by-step tutor. Every conversation is a chat with a
+canvas of its own; the chat list is the hamburger in the sidebar header.
 
 Built on the `@excalidraw/excalidraw` npm package, not a fork. The product is
 `bridge/`; nothing else is required to run it.
@@ -26,6 +27,9 @@ Built on the `@excalidraw/excalidraw` npm package, not a fork. The product is
 One process, one port, opens a browser at http://127.0.0.1:8787. You do not
 need a key to start it — click the gear in the AI panel, pick a provider and
 paste one.
+
+Your chats live in `~/.excalidraw-ai/chats/`, one directory per chat (plain
+JSON, no database, no service). Set `AI_DATA_DIR` to keep them elsewhere.
 
 ## Run from source
 

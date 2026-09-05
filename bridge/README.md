@@ -18,6 +18,7 @@ Connects an Excalidraw canvas to Penecho's "understand the canvas by viewing it"
     agent-contract.mjs     agent persona, tool schemas, model allowlist, history trimming
     geometry.mjs           pure canvas helpers (bbox, labels, TOON rows)
     server.mjs             /api/ai/diagram, /chat, /describe, /models (key stays server-side)
+    store.mjs              the chat store: one directory per chat, on disk
     client.mjs             wireExcalidrawAI() -> refine / accept / reject + the agent loop
     host/                  Vite + React app: Excalidraw + chat panel
     test.mjs               offline tests (no key, no browser)
@@ -55,6 +56,21 @@ Or pass env vars directly (any OpenAI-compatible endpoint):
     AI_API_URL=https://api.deepseek.com/v1 AI_API_KEY=sk-... AI_API_MODEL=deepseek-chat node server.mjs
 
 Anthropic keys need a small extra adapter; say which provider when you share the key and I will add it.
+
+## Where your data lives
+
+Chats are kept in `~/.excalidraw-ai/chats/`, one directory per chat:
+
+    <id>/meta.json    title and timestamps
+    <id>/chat.json    the visible log plus the model's own transcript
+    <id>/scene.json   the canvas elements
+    <id>/files.json   embedded images, written only when the image set changes
+
+Plain JSON, no database and no service - back it up by copying the directory,
+and delete a chat by deleting its folder. `AI_DATA_DIR` moves the whole store.
+The routes behind it are `GET|POST /api/chats` and
+`GET|PUT|DELETE /api/chats/:id`; like the config writes, they refuse
+cross-origin requests.
 
 ## Run the host
 

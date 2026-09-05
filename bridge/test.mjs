@@ -244,6 +244,45 @@ check("the query string is stripped before resolving", safeJoin(ROOT, "/index.ht
 check("the hash is stripped before resolving", safeJoin(ROOT, "/index.html#x") === safeJoin(ROOT, "/index.html"));
 check("root resolves to the build directory itself", [ROOT, ROOT + require$sep].indexOf(safeJoin(ROOT, "/")) !== -1);
 
+// --- chat store: two chats must not see each other's canvas or transcript ---
+{
+  const { mkdtempSync, rmSync, writeFileSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  process.env.AI_DATA_DIR = mkdtempSync(join(tmpdir(), "exai-"));
+  const store = await import("./store.mjs");
+
+  const a = store.createChat("alpha");
+  const b = store.createChat("beta");
+  store.writeChat(a.id, { elements: [{ id: "a1" }], chat: { display: [{ role: "user", text: "hi" }], messages: [{ role: "user", content: "hi" }] } });
+  store.writeChat(b.id, { elements: [{ id: "b1" }], chat: { display: [], messages: [] } });
+
+  const ra = store.readChat(a.id), rb = store.readChat(b.id);
+  check("each chat keeps its own canvas", ra.scene.elements[0].id === "a1" && rb.scene.elements[0].id === "b1");
+  check("each chat keeps its own transcript", ra.chat.messages.length === 1 && rb.chat.messages.length === 0);
+  check("a chat with no images reads back an empty file map", Object.keys(ra.files).length === 0);
+  check("list is newest first and complete", store.listChats().length === 2 && store.listChats()[0].id === b.id);
+
+  // images are written as their own part so a stroke does not re-send megabytes
+  store.writeChat(a.id, { files: { f1: { id: "f1", dataURL: "data:image/png;base64,AAAA" } } });
+  store.writeChat(a.id, { elements: [{ id: "a1" }, { id: "a2" }] });
+  check("an elements-only save keeps the images", store.readChat(a.id).files.f1.dataURL.startsWith("data:image/png") && store.readChat(a.id).scene.elements.length === 2);
+
+  store.writeChat(a.id, { title: "renamed" });
+  check("a title-only save leaves the canvas alone", store.readChat(a.id).scene.elements[0].id === "a1" && store.readChat(a.id).meta.title === "renamed");
+
+  // a torn write is what the tmp+rename dance exists to prevent
+  writeFileSync(join(process.env.AI_DATA_DIR, "chats", a.id, "scene.json.9999.tmp"), "{\"elements\":[");
+  check("a stray temp file does not corrupt the read", store.readChat(a.id).scene.elements[0].id === "a1");
+
+  store.deleteChat(a.id);
+  check("delete removes only the chat asked for", store.readChat(a.id) === null && store.readChat(b.id).scene.elements[0].id === "b1");
+  check("a bad chat id is refused before it reaches the filesystem", ["../../etc", "a/b", "", "x".repeat(65)].every(function (id) {
+    try { store.readChat(id); return false; } catch (e) { return e.message === "bad chat id"; }
+  }));
+  rmSync(process.env.AI_DATA_DIR, { recursive: true, force: true });
+}
+
 console.log("");
 console.log(pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);

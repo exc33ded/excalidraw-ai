@@ -63,32 +63,32 @@ function assignFreshIds(specs) {
   });
 }
 
-const MESSAGES_KEY = "excalidraw-ai-agent-messages";
 // query results accumulate every turn; past this the oldest turns are dropped whole
 const MESSAGES_BUDGET = 120000;
 
-export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", chatEndpoint = "/api/ai/chat", describeEndpoint = "/api/ai/describe", modelsEndpoint = "/api/ai/models", statusEndpoint = "/api/ai/status", configEndpoint = "/api/ai/config", testEndpoint = "/api/ai/test", token = "", appendGap = 80 }) {
+export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", chatEndpoint = "/api/ai/chat", describeEndpoint = "/api/ai/describe", modelsEndpoint = "/api/ai/models", statusEndpoint = "/api/ai/status", configEndpoint = "/api/ai/config", testEndpoint = "/api/ai/test", chatsEndpoint = "/api/chats", onMessages, token = "", appendGap = 80 }) {
   let draft = null; // { sourceIds:Set, draftIds:Set, sourceBbox, mode:"sketch"|"text" }
   const agent = { messages: [], snapshot: null }; // snapshot = scene before the last turn
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = "Bearer " + token;
   const prefs = { visionModel: "" }; // set by the panel's settings view; "" = server default
 
-  // conversation survives a refresh; the system prompt is always rebuilt from
-  // source so a prompt edit reaches returning users
-  try {
-    const saved = JSON.parse(localStorage.getItem(MESSAGES_KEY) || "[]");
-    if (Array.isArray(saved) && saved.length) agent.messages = [{ role: "system", content: systemPromptFor("assistant") }].concat(saved.filter(function (m) { return m.role !== "system"; }));
-  } catch (e) {}
-
+  // The transcript belongs to whichever chat is open, so persisting it is the
+  // host's job now (it knows the chat id); this only hands over the slim copy.
   function saveMessages() {
-    try {
-      // screenshots handed to a vision brain are megabytes of base64; keep a marker only
-      const slim = agent.messages.slice(1).map(function (m) {
-        return Array.isArray(m.content) ? Object.assign({}, m, { content: "[image omitted]" }) : m;
-      });
-      localStorage.setItem(MESSAGES_KEY, JSON.stringify(slim));
-    } catch (e) {}
+    if (!onMessages) return;
+    // screenshots handed to a vision brain are megabytes of base64; keep a marker only
+    onMessages(agent.messages.slice(1).map(function (m) {
+      return Array.isArray(m.content) ? Object.assign({}, m, { content: "[image omitted]" }) : m;
+    }));
+  }
+
+  // swap in a stored conversation. The system prompt is always rebuilt from
+  // source, so a prompt edit reaches returning users.
+  function agentLoad(messages) {
+    const past = Array.isArray(messages) ? messages.filter(function (m) { return m.role !== "system"; }) : [];
+    agent.messages = past.length ? [{ role: "system", content: systemPromptFor("assistant") }].concat(past) : [];
+    agent.snapshot = null; // a snapshot of another chat's canvas must never be revertable here
   }
 
   function sceneElements() {
@@ -653,6 +653,13 @@ export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", 
     return data; // same shape as status, plus the new model list
   }
 
+  async function chatsFetch(path, opts) {
+    const res = await fetch(chatsEndpoint + path, Object.assign({ headers: headers }, opts));
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(data.error || ("chat store failed (" + res.status + ")"));
+    return data;
+  }
+
   function configure(opts) {
     if (opts && typeof opts.visionModel === "string") prefs.visionModel = opts.visionModel;
   }
@@ -665,6 +672,13 @@ export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", 
     generateFromText: generateFromText,
     accept: accept,
     reject: reject,
-    agent: { send: agentSend, reset: agentReset, revert: agentRevert, models: agentModels, status: agentStatus, setup: agentSetup, test: agentTest },
+    agent: { send: agentSend, reset: agentReset, revert: agentRevert, load: agentLoad, models: agentModels, status: agentStatus, setup: agentSetup, test: agentTest },
+    chats: {
+      list: function () { return chatsFetch("", {}).then(function (r) { return r.chats; }); },
+      create: function (title) { return chatsFetch("", { method: "POST", body: JSON.stringify({ title: title }) }).then(function (r) { return r.meta; }); },
+      read: function (id) { return chatsFetch("/" + id, {}); },
+      save: function (id, patch) { return chatsFetch("/" + id, { method: "PUT", body: JSON.stringify(patch) }); },
+      remove: function (id) { return chatsFetch("/" + id, { method: "DELETE" }); },
+    },
   };
 }
