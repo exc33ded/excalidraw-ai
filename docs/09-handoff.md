@@ -213,6 +213,20 @@ tutor conversation on HTTPS behaved as specified, including the
   and `/describe` then returned the no-vision-model message instead of a
   phantom id; the saved provider, key, baseUrl and model list survived a
   restart ("loaded saved settings: custom …1234, 2 models").
+- The settings screen, clicked through in the user's own Chrome against the
+  real DeepSeek endpoint: the form renders inside the sidebar in Excalidraw's
+  own styling, Test connection returned "Key works · 3 usable models" with
+  the vision and reasoning tags correct, and no console errors.
+
+**A key from `.env` is not a preset.** The first browser pass caught the
+settings screen reporting *OpenAI* while the app was running DeepSeek: a `.env`
+key leaves `provider` empty, so the picker fell through to the first preset and
+Update key would have swapped a working endpoint for that one. `/api/ai/status`
+now reports `fromEnv` and the live `baseUrl`, and the picker gains an explicit
+**From bridge/.env** entry that is testable but not saveable - switching away
+has to be a deliberate choice of a provider. A test with neither provider nor
+URL checks whatever is loaded, and an endpoint whose base URL matches a known
+provider picks up that preset's verified flags.
 - 18 browser tests pass (`node bridge/browser-test.mjs`, headless Chrome via
   `puppeteer-core`, `CHROME=` to point at the binary): panel renders inside
   `.excalidraw`; dark mode follows Excalidraw's toggle; `r`/Delete typed in the
@@ -261,9 +275,9 @@ tutor conversation on HTTPS behaved as specified, including the
   real turn and let the observed value overwrite the guess — `callChat`
   currently returns only `message`, so that needs plumbing. Until then a wrong
   guess costs a bad token budget, which surfaces as a 400 or a truncated reply.
-- The settings screen itself was never opened in a browser this session; the
-  routes behind it were exercised with curl and the host build is clean, but
-  the form has not been clicked through.
+- Saving a discovered list from a **real** provider. The test path was clicked
+  through live (below), but nobody has pressed Save on it, so `config.json`
+  has only ever been written by the mock-provider runs.
 
 ---
 
