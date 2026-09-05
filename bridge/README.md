@@ -26,8 +26,21 @@ Connects an Excalidraw canvas to Penecho's "understand the canvas by viewing it"
 ## Run the server
 
     cd bridge
+    node server.mjs
+
+You do not need a key to start it. Open the host, click the gear in the AI
+panel, pick a provider and paste your key: **Test connection** checks the key
+and lists the models that provider actually serves, and **Save** stores it in
+`bridge/config.json` (gitignored, 0600). Choosing "Other (OpenAI-compatible)"
+lets you point at any endpoint that serves `/chat/completions`.
+
+To set the key from a file instead:
+
     cp .env.example .env      # put your real key in .env (gitignored)
     node server.mjs
+
+A key saved from the panel wins over `.env` — it is the one you typed most
+recently. Delete `bridge/config.json` to fall back to `.env`.
 
 Or pass env vars directly (any OpenAI-compatible endpoint):
 
@@ -45,11 +58,20 @@ The Vite dev server proxies /api to the bridge server on :8787.
 
 ## Configure
 
-See `.env.example`. `AI_MODELS` lists the models the panel's settings offer
-(`id[:vision][:maxTokens]`, comma-separated); the server refuses any other
-model. Entries flagged `:vision` appear in the vision picker (Refine and the
-capture tool) as well as the chat picker. To add a model, append it to that
-line and restart the server; no code changes.
+Easiest: use the panel's settings screen, which reads the model list from the
+provider itself and needs no restart.
+
+To pin the list by hand instead, see `.env.example`. `AI_MODELS` lists the
+models the panel offers (`id[:vision][:reasoning][:maxTokens]`, comma-separated);
+the server refuses any other model. Entries flagged `:vision` appear in the
+vision picker (Refine and the capture tool) as well as the chat picker;
+`:reasoning` marks models that spend their output budget on reasoning tokens
+before emitting anything, which is why they need a large `maxTokens`. To add a
+model, append it to that line and restart the server; no code changes.
+
+A discovered model that no preset knows is guessed from its id and given a
+conservative 8000-token budget, because 32000 is a 400 on most non-reasoning
+models. Override it with `AI_MODELS` if the guess is wrong.
 The bridge binds 127.0.0.1 by default. To expose it, set `AI_BRIDGE_HOST=0.0.0.0`,
 `AI_BRIDGE_TOKEN=<secret>` (the host sends it from `VITE_AI_BRIDGE_TOKEN`), and
 `ALLOWED_ORIGIN`.

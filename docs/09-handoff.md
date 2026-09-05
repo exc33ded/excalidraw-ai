@@ -30,21 +30,24 @@ permanent upstream merge cost. **Revisit only when per-turn undo forces it**
 
 ## 2. What exists
 
-    bridge/server.mjs           POST /api/ai/diagram, /api/ai/chat, /api/ai/describe
+    bridge/server.mjs           /api/ai/{diagram,chat,describe} + {status,test,config}
     bridge/vision.mjs           OpenAI-compatible vision + chat calls
     bridge/diagram-contract.mjs one-shot diagram prompts + validateSkeleton
     bridge/agent-contract.mjs   AGENT_SYSTEM_PROMPT + AGENT_TOOLS (no browser deps)
     bridge/geometry.mjs         pure helpers: bbox, selection expansion, labels, TOON rows
     bridge/client.mjs           wireExcalidrawAI(): tool implementations + the agent loop
-    bridge/test.mjs             50 offline tests, no key and no browser needed
+    bridge/test.mjs             99 offline tests, no key and no browser needed
     bridge/browser-test.mjs     18 Chrome tests (puppeteer-core, real key, both servers up)
     bridge/host/src/AgentPanel  the chat panel, an Excalidraw <Sidebar> with a settings view
     bridge/host/src/App.jsx     Excalidraw + Footer (Refine / Accept / Reject) + scene save
     bridge/host/vite.config.js  aliases for client.mjs + the mermaid subgraph patch
 
 **Run:** `node bridge/server.mjs` (127.0.0.1:8787) and `npm run dev` in
-`bridge/host` (:5173, proxies `/api` to 8787). Key lives in `bridge/.env`, never
-the browser. `AI_MODELS` in `.env` is the picker's allowlist (`id[:vision][:maxTokens]`).
+`bridge/host` (:5173, proxies `/api` to 8787). The key is **server-side either
+way** and never reaches the browser; it can come from `bridge/.env` or from the
+panel's settings screen, which writes `bridge/config.json` (see BYOK below —
+`config.json` wins). `AI_MODELS` in `.env` is the picker's allowlist
+(`id[:vision][:reasoning][:maxTokens]`) when no key was set from the panel.
 
 **Server env, all optional:** `AI_BRIDGE_HOST` (default loopback), `AI_BRIDGE_TOKEN`
 (bearer required on `/api/*`; the host sends `VITE_AI_BRIDGE_TOKEN`),
@@ -278,6 +281,20 @@ provider picks up that preset's verified flags.
 - Saving a discovered list from a **real** provider. The test path was clicked
   through live (below), but nobody has pressed Save on it, so `config.json`
   has only ever been written by the mock-provider runs.
+- Refine against an endpoint with **no vision model**, in the panel. The server
+  side was verified (`/describe` returns the honest message, not a phantom id)
+  and the path was traced by hand — `refine()` -> `post()` -> 400 -> `err.error`
+  -> the `catch` in `App.jsx:45` -> the footer's `.ai-bar__error` — but it was
+  not clicked, because the only configured endpoint here has a vision model and
+  reconfiguring would have overwritten a working setup.
+
+**The saved key is plaintext at rest, deliberately.** `config.json` is
+gitignored and written `0600`, which is the same exposure as `bridge/.env` and
+no worse. It is a `ponytail:` shortcut with the upgrade named in
+`server.mjs`: if this ever ships as a desktop app, move it to the OS keychain
+via Electron's `safeStorage` (DPAPI / Keychain), which needs no new dependency.
+Do not treat the current state as an oversight — but do not ship an installer
+without making that swap.
 
 ---
 
@@ -285,15 +302,24 @@ provider picks up that preset's verified flags.
 
 ### 1. Multiple providers
 
-**Adding a model today** is one line in `bridge/.env` and a server restart:
+**Adding a model today** is a Test connection in the settings screen, which
+reads the list from the provider. To pin it by hand instead, one line in
+`bridge/.env` and a server restart:
 
-    AI_MODELS=deepseek-v4-flash,deepseek-v4-pro,deepseek-v4-flash-vision-exp:vision,some-new-model:vision:16000
+    AI_MODELS=deepseek-v4-flash:reasoning,deepseek-v4-pro:reasoning,some-new-model:vision:16000
 
-Format is `id[:vision][:maxTokens]`. `:vision` puts it in the vision picker and
-lets it serve `/describe` and `/diagram`; the token budget defaults to 32000,
-which is right for reasoning models and a 400 on most others, so set it. Any
-model on the same OpenAI-compatible endpoint works as is. The chat picker
-shows every entry; the vision picker only `:vision` ones.
+Format is `id[:vision][:reasoning][:maxTokens]`. `:vision` puts it in the vision
+picker and lets it serve `/describe` and `/diagram`; `:reasoning` is a label the
+panel shows; the token budget defaults to 32000, which is right for reasoning
+models and a 400 on most others, so set it. Any model on the same
+OpenAI-compatible endpoint works as is. The chat picker shows every entry; the
+vision picker only `:vision` ones.
+
+**A custom endpoint no longer needs `.env` at all** — "Other
+(OpenAI-compatible)" in the picker takes a base URL directly. What is still
+missing is a *different message shape*: Anthropic needs an adapter
+(`tool_use`/`tool_result` blocks), and `PROVIDER_PRESETS` is where a `provider`
+field per entry would go.
 
 What remains is **multiple providers**: everything assumes one
 OpenAI-compatible `/chat/completions` at `AI_API_URL`. Anthropic needs an

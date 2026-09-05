@@ -29,8 +29,10 @@ Built on the `@excalidraw/excalidraw` npm package, not a fork. The product is
     npm install
     npm run dev                  # http://localhost:5173
 
-Models the chat offers come from `AI_MODELS` in `bridge/.env`
-(`id[:vision][:maxTokens]`, comma separated). See `bridge/README.md`.
+Then click the gear in the AI panel, pick a provider and paste your API key:
+Test connection checks it and lists the models that provider serves. To pin the
+list by hand instead, set `AI_MODELS` in `bridge/.env`
+(`id[:vision][:reasoning][:maxTokens]`, comma separated). See `bridge/README.md`.
 
 ## Test
 
