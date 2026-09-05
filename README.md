@@ -21,15 +21,24 @@ Built on the `@excalidraw/excalidraw` npm package, not a fork. The product is
 
 ## Run
 
+    npx excalidraw-ai
+
+One process, one port, opens a browser at http://127.0.0.1:8787. You do not
+need a key to start it — click the gear in the AI panel, pick a provider and
+paste one.
+
+## Run from source
+
     cd bridge
-    cp .env.example .env         # put your OpenAI-compatible key in .env
     node server.mjs              # http://127.0.0.1:8787
 
     cd bridge/host
     npm install
-    npm run dev                  # http://localhost:5173
+    npm run dev                  # http://localhost:5173, proxies /api to 8787
 
-Then click the gear in the AI panel, pick a provider and paste your API key:
+Use :5173 while developing; the bridge only serves the built app if you have
+run `npm run build` in `bridge/host`. Either way, click the gear in the AI
+panel, pick a provider and paste your API key:
 Test connection checks it and lists the models that provider serves. To pin the
 list by hand instead, set `AI_MODELS` in `bridge/.env`
 (`id[:vision][:reasoning][:maxTokens]`, comma separated). See `bridge/README.md`.

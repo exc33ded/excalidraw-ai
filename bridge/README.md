@@ -23,7 +23,15 @@ Connects an Excalidraw canvas to Penecho's "understand the canvas by viewing it"
     test.mjs               offline tests (no key, no browser)
     browser-test.mjs       Chrome tests (real key, both servers running)
 
-## Run the server
+## Run it (one command)
+
+    npx excalidraw-ai
+
+One process on one port: the bridge serves the built app and its own `/api`.
+It opens a browser at http://127.0.0.1:8787; click the gear in the AI panel to
+add your API key. `--no-open` skips the browser, `PORT=1234` moves the port.
+
+## Run it from source
 
     cd bridge
     node server.mjs

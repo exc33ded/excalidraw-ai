@@ -30,13 +30,16 @@ permanent upstream merge cost. **Revisit only when per-turn undo forces it**
 
 ## 2. What exists
 
+    bridge/cli.mjs              `npx excalidraw-ai` entry (server + open a browser)
     bridge/server.mjs           /api/ai/{diagram,chat,describe} + {status,test,config}
+    bridge/static.mjs           serves host/dist from the bridge, one port
     bridge/vision.mjs           OpenAI-compatible vision + chat calls
     bridge/diagram-contract.mjs one-shot diagram prompts + validateSkeleton
     bridge/agent-contract.mjs   AGENT_SYSTEM_PROMPT + AGENT_TOOLS (no browser deps)
     bridge/geometry.mjs         pure helpers: bbox, selection expansion, labels, TOON rows
     bridge/client.mjs           wireExcalidrawAI(): tool implementations + the agent loop
-    bridge/test.mjs             99 offline tests, no key and no browser needed
+    bridge/test.mjs             108 offline tests, no key and no browser needed
+    bridge/package.json         the publishable package (bin: excalidraw-ai)
     bridge/browser-test.mjs     18 Chrome tests (puppeteer-core, real key, both servers up)
     bridge/host/src/AgentPanel  the chat panel, an Excalidraw <Sidebar> with a settings view
     bridge/host/src/App.jsx     Excalidraw + Footer (Refine / Accept / Reject) + scene save
@@ -48,6 +51,28 @@ way** and never reaches the browser; it can come from `bridge/.env` or from the
 panel's settings screen, which writes `bridge/config.json` (see BYOK below —
 `config.json` wins). `AI_MODELS` in `.env` is the picker's allowlist
 (`id[:vision][:reasoning][:maxTokens]`) when no key was set from the panel.
+
+**One command: `npx excalidraw-ai`.** `static.mjs` serves `host/dist` from the
+bridge, so the published package is one process on one port instead of two
+servers and a proxy. Anything that is not `/api/*` falls through to the build;
+API 404s stay JSON. Unknown paths serve `index.html` (single route), hashed
+assets get `immutable` caching and `index.html` gets `no-store`.
+
+`safeJoin` is the one part of that path that must not be lazy — the URL is
+attacker input, so it decodes, rejects null bytes and malformed encoding, then
+*proves* the resolved path is still inside `dist`. Verified live: `/../.env`,
+`/..%2f.env`, `/%2e%2e/.env` and `/assets/../../.env` all 400, and `test.mjs`
+pins the same cases.
+
+`cli.mjs` is the `bin`; its only job is setting `AI_OPEN=1` before importing
+the server, so `node server.mjs` keeps its existing dev behaviour and never
+opens a browser. `npm pack` was dry-run checked: 2.7 MB, 142 files, and the
+tarball contains `.env.example` but **not** `.env`, `config.json`, the tests or
+any log. `prepack` builds the host, so publishing without a fresh `dist` is not
+possible.
+
+> In development keep using Vite on :5173. The bridge only serves a build if
+> one exists, and a stale `dist` served from :8787 is a confusing way to test.
 
 **Server env, all optional:** `AI_BRIDGE_HOST` (default loopback), `AI_BRIDGE_TOKEN`
 (bearer required on `/api/*`; the host sends `VITE_AI_BRIDGE_TOKEN`),

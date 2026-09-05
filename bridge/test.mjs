@@ -2,6 +2,8 @@
 import { validateSkeleton, DIAGRAM_SYSTEM_PROMPT } from "./diagram-contract.mjs";
 import { buildVisionRequest } from "./vision.mjs";
 import { AGENT_SYSTEM_PROMPT, AGENT_TOOLS, AGENT_MODES, systemPromptFor, parseModelList, trimMessages, dropIncompleteTurn, PROVIDER_PRESETS, maskKey, mergeDiscoveredModels, DISCOVERED_MAX_TOKENS, REASONING_MAX_TOKENS } from "./agent-contract.mjs";
+import { sep as require$sep } from "node:path";
+import { safeJoin, DIST } from "./static.mjs";
 import { bboxOf, expandSelection, textDescriptionOf, labelIndex, isBoundLabel, textOf, summarizeElement, centeredLabelPosition, toQueryRows, QUERY_COLUMNS, arrowBetween, positionBoundArrows, snapArrowEndpoints } from "./geometry.mjs";
 
 let pass = 0, fail = 0;
@@ -220,6 +222,27 @@ check("vision and reasoning coexist on one entry", parseModelList("m:vision:reas
 const dsDiscovered = mergeDiscoveredModels(["deepseek-v4-flash", "deepseek-v4-flash-vision-exp"], PROVIDER_PRESETS.deepseek.models);
 check("a preset's reasoning flag survives discovery", dsDiscovered.every(function (m) { return m.reasoning === true; }));
 check("openai preset models are not marked reasoning", parseModelList(PROVIDER_PRESETS.openai.models).every(function (m) { return m.reasoning === false; }));
+
+// Static serving: the URL path is attacker input, so escaping the build
+// directory is the thing that must never work.
+const ROOT = DIST;
+const escapes = [
+  "/../.env", "/../../.env", "/../config.json", "/assets/../../.env",
+  "/%2e%2e/%2e%2e/.env", "/..%2f..%2f.env", "/....//....//.env",
+  "/ ", "/%00", "/%",
+];
+check("no traversal escapes the build directory", escapes.every(function (u) {
+  const r = safeJoin(ROOT, u);
+  return r === null || r === ROOT || r.startsWith(ROOT + require$sep);
+}));
+check("traversal above the root is refused outright", safeJoin(ROOT, "/../.env") === null && safeJoin(ROOT, "/../../.env") === null);
+check("encoded traversal is refused", safeJoin(ROOT, "/%2e%2e/%2e%2e/.env") === null);
+check("null byte is refused", safeJoin(ROOT, "/a b") === null);
+check("malformed percent-encoding is refused", safeJoin(ROOT, "/%") === null);
+check("a normal asset path resolves inside the root", (safeJoin(ROOT, "/assets/index-abc.js") || "").startsWith(ROOT + require$sep));
+check("the query string is stripped before resolving", safeJoin(ROOT, "/index.html?v=1") === safeJoin(ROOT, "/index.html"));
+check("the hash is stripped before resolving", safeJoin(ROOT, "/index.html#x") === safeJoin(ROOT, "/index.html"));
+check("root resolves to the build directory itself", [ROOT, ROOT + require$sep].indexOf(safeJoin(ROOT, "/")) !== -1);
 
 console.log("");
 console.log(pass + " passed, " + fail + " failed");

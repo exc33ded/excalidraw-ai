@@ -1,0 +1,33 @@
+{
+  "name": "excalidraw-ai",
+  "version": "0.1.0",
+  "description": "Excalidraw with an AI agent that draws on the canvas. Bring your own API key.",
+  "type": "module",
+  "bin": {
+    "excalidraw-ai": "cli.mjs"
+  },
+  "files": [
+    "cli.mjs",
+    "server.mjs",
+    "static.mjs",
+    "vision.mjs",
+    "diagram-contract.mjs",
+    "agent-contract.mjs",
+    "geometry.mjs",
+    "client.mjs",
+    "host/dist",
+    ".env.example",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test.mjs",
+    "build": "npm --prefix host run build",
+    "prepack": "npm --prefix host run build"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "license": "MIT",
+  "keywords": ["excalidraw", "diagram", "ai", "agent", "mermaid"]
+}

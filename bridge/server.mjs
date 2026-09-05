@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { callVisionModel, callChat } from "./vision.mjs";
 import { validateSkeleton, DIAGRAM_GENERATION_PROMPT, DESCRIBE_SYSTEM_PROMPT } from "./diagram-contract.mjs";
 import { parseModelList, PROVIDER_PRESETS, maskKey, mergeDiscoveredModels } from "./agent-contract.mjs";
+import { serveStatic, openBrowser, DIST } from "./static.mjs";
 
 try { process.loadEnvFile?.(new URL("./.env", import.meta.url)); } catch (e) {}
 
@@ -303,11 +304,20 @@ const server = createServer(async function (req, res) {
       return send(res, 500, { error: e && e.message ? e.message : "internal error" });
     }
   }
+  // anything that is not an API call is the built app, when there is one
+  if (req.method === "GET" && req.url.indexOf("/api/") !== 0) return serveStatic(req, res);
   return send(res, 404, { error: "not found" });
 });
 
-server.listen(PORT, HOST, function () {
-  console.log("Excalidraw AI bridge listening on http://" + HOST + ":" + PORT + (TOKEN ? " (token required)" : ""));
+server.listen(PORT, HOST, async function () {
+  const url = "http://" + HOST + ":" + PORT;
+  const { stat } = await import("node:fs/promises");
+  const built = await stat(DIST).then(function () { return true; }).catch(function () { return false; });
+  console.log("Excalidraw AI bridge listening on " + url + (TOKEN ? " (token required)" : ""));
+  if (built) console.log("open " + url + " in a browser");
   console.log("diagram model: " + config.model + " (base: " + config.baseUrl + ")");
   console.log("agent models:  " + MODELS.map(function (m) { return m.id + (m.vision ? " (vision)" : ""); }).join(", "));
+  if (!config.apiKey) console.log("no API key yet - add one in the app's AI panel (gear icon)");
+  // only the npx entry sets AI_OPEN, so `node server.mjs` keeps its dev behaviour
+  if (built && process.env.AI_OPEN === "1" && !process.argv.includes("--no-open")) openBrowser(url);
 });
