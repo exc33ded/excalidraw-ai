@@ -12,6 +12,13 @@ Built on the `@excalidraw/excalidraw` npm package, not a fork. The product is
     docs/            design notes, the Penecho reference study, and 09-handoff.md
                      (start there: what is built, what is proven, what is next)
 
+## Prerequisites
+
+- Node 20.12 or newer (uses `process.loadEnvFile` and `AbortSignal.any`).
+- An API key for any OpenAI-compatible chat endpoint (OpenAI, DeepSeek, a
+  local server). `bridge/.env.example` has a preset for each.
+- Chrome, only for the browser tests.
+
 ## Run
 
     cd bridge
