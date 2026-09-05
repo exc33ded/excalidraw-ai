@@ -234,7 +234,7 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
           {view === "settings" ? "AI settings" : "AI agent"}
           {view === "chat" && (
             <span className="ai-sidebar__subtitle" title={loadError || settings.chat}>
-              {AGENT_MODES[mode].label} · {loadError ? "models unavailable" : settings.chat || (models === null ? "loading models" : "no models")}
+              {AGENT_MODES[mode].label} · {loadError ? "models unavailable" : needsKey ? "no API key" : settings.chat || (models === null ? "loading models" : "no models")}
             </span>
           )}
         </div>
@@ -333,6 +333,9 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
             </div>
           )}
           <hr className="ai-sidebar__rule" />
+          {needsKey ? (
+            <p className="ai-sidebar__hint">Model pickers appear once a key is saved — the list comes from your provider.</p>
+          ) : (<>
           <label className="ai-sidebar__field">
             <span>Chat model</span>
             <small>Runs the agent loop and edits the canvas.</small>
@@ -350,10 +353,11 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
           {chatModel && chatModel.vision && (
             <p className="ai-sidebar__hint">The chat model can see: captures go to it directly instead of through the vision model.</p>
           )}
+          </>)}
           {loadError && <p className="ai-sidebar__hint ai-sidebar__hint--error">{loadError}</p>}
-          <p className="ai-sidebar__hint">
+          {!needsKey && (<p className="ai-sidebar__hint">
             Picking a provider sets its model list. To offer different models, set <code>AI_MODELS</code> in <code>bridge/.env</code> (<code>id:vision:maxTokens</code>) and restart the bridge.
-          </p>
+          </p>)}
         </div>
       ) : (
         <>

@@ -164,6 +164,10 @@ const server = createServer(async function (req, res) {
     return send(res, 401, { error: "unauthorized" });
   }
   if (req.method === "GET" && req.url === "/api/ai/models") {
+    // With no key there is no provider, so there is nothing to offer. Serving
+    // the built-in fallbacks here advertises a configuration nobody chose -
+    // a fresh install showed "deepseek-v4-flash" and "gpt-4o" in the pickers.
+    if (!config.apiKey) return send(res, 200, { models: [], default: "", visionDefault: "" });
     return send(res, 200, { models: MODELS, default: MODELS[0].id, visionDefault: config.model });
   }
   // first-run detection for the settings screen. Never returns the key itself.
@@ -331,9 +335,14 @@ server.listen(PORT, HOST, async function () {
   const built = await stat(DIST).then(function () { return true; }).catch(function () { return false; });
   console.log("Excalidraw AI bridge listening on " + url + (TOKEN ? " (token required)" : ""));
   if (built) console.log("open " + url + " in a browser");
-  console.log("diagram model: " + config.model + " (base: " + config.baseUrl + ")");
-  console.log("agent models:  " + MODELS.map(function (m) { return m.id + (m.vision ? " (vision)" : ""); }).join(", "));
-  if (!config.apiKey) console.log("no API key yet - add one in the app's AI panel (gear icon)");
+  // with no key the model lines are defaults nobody chose, and printing them
+  // before "no API key" reads as if it were already set up
+  if (config.apiKey) {
+    console.log("diagram model: " + config.model + " (base: " + config.baseUrl + ")");
+    console.log("agent models:  " + MODELS.map(function (m) { return m.id + (m.vision ? " (vision)" : ""); }).join(", "));
+  } else {
+    console.log("No API key yet. Open the app, click the gear in the AI panel, and add one.");
+  }
   // only the npx entry sets AI_OPEN, so `node server.mjs` keeps its dev behaviour
   if (built && process.env.AI_OPEN === "1" && !process.argv.includes("--no-open")) openBrowser(url);
 });
