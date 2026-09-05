@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
+import { readFileSync, writeFileSync } from "node:fs";
 import { callVisionModel, callChat } from "./vision.mjs";
 import { validateSkeleton, DIAGRAM_GENERATION_PROMPT, DESCRIBE_SYSTEM_PROMPT } from "./diagram-contract.mjs";
-import { parseModelList } from "./agent-contract.mjs";
+import { parseModelList, PROVIDER_PRESETS, maskKey } from "./agent-contract.mjs";
 
 try { process.loadEnvFile?.(new URL("./.env", import.meta.url)); } catch (e) {}
 
@@ -10,16 +11,50 @@ const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.AI_BRIDGE_HOST || "127.0.0.1";
 const TOKEN = process.env.AI_BRIDGE_TOKEN || ""; // optional shared secret for /api/*
 const UPSTREAM_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 180000);
+// vision.mjs reads config.apiKey per call, so mutating this object is all the
+// runtime BYOK swap needs - no restart, no re-wiring.
 const config = {
   baseUrl: process.env.AI_API_URL || "https://api.openai.com/v1",
   apiKey: process.env.AI_API_KEY || "",
   model: process.env.AI_API_MODEL || "gpt-4o",
   agentModel: process.env.AI_AGENT_MODEL || "deepseek-v4-flash",
 };
-// the allowlist the picker shows and every /api/ai/* route enforces
-const MODELS = parseModelList(process.env.AI_MODELS, config.agentModel);
-// the configured vision model is always offered, and always as vision
-if (!MODELS.some(function (m) { return m.id === config.model; })) MODELS.push({ id: config.model, vision: true, maxTokens: 32000 });
+let provider = ""; // set only when the key came from the settings screen
+
+// the allowlist the picker shows and every /api/ai/* route enforces. Under
+// BYOK the user is the operator, so this is no longer a spend boundary - but
+// it still carries each model's vision flag and token budget, both load-bearing.
+function buildModels(listStr, agentModel, visionModel) {
+  const list = parseModelList(listStr, agentModel);
+  // the configured vision model is always offered, and always as vision, which
+  // is also what keeps the list non-empty for MODELS[0]
+  if (!list.some(function (m) { return m.id === visionModel; })) list.push({ id: visionModel, vision: true, maxTokens: 32000 });
+  return list;
+}
+let MODELS = buildModels(process.env.AI_MODELS, config.agentModel, config.model);
+
+// BYOK settings persist here so the app comes back configured. ponytail: plain
+// JSON at 0600; move to the OS keychain (Electron safeStorage) when this ships
+// as a desktop app.
+const CONFIG_FILE = new URL("./config.json", import.meta.url);
+
+function applyProvider(name, apiKey) {
+  const preset = PROVIDER_PRESETS[name];
+  if (!preset) return false;
+  config.baseUrl = preset.baseUrl;
+  config.model = preset.visionModel;
+  config.agentModel = preset.agentModel;
+  if (apiKey) config.apiKey = apiKey;
+  MODELS = buildModels(preset.models, preset.agentModel, preset.visionModel);
+  provider = name;
+  return true;
+}
+
+// a saved key wins over .env: it is the one the user typed most recently
+try {
+  const saved = JSON.parse(readFileSync(CONFIG_FILE, "utf8"));
+  if (saved && applyProvider(saved.provider, saved.apiKey)) console.log("loaded saved settings: " + saved.provider + " " + maskKey(config.apiKey));
+} catch (e) {}
 
 // body.model for the vision routes: must be on the list AND vision-capable
 function visionModelFor(body) {
@@ -33,6 +68,20 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
   "Access-Control-Allow-Headers": "content-type, authorization",
 };
+
+// Writing the provider + key is a trust boundary the read routes are not:
+// under the default `*` CORS, any page open in the user's browser could
+// otherwise POST its own key here, or (before presets) repoint baseUrl at a
+// collector. A browser always sends Origin on a cross-origin POST, so a
+// missing Origin means a local non-browser client (curl, Electron main).
+const LOCAL_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:" + PORT, "http://127.0.0.1:" + PORT];
+function originOk(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  const allowed = process.env.ALLOWED_ORIGIN;
+  if (allowed && allowed !== "*") return origin === allowed;
+  return LOCAL_ORIGINS.indexOf(origin) !== -1;
+}
 
 // abort the upstream call when the browser gives up (Stop button, closed tab)
 // or when the provider hangs. Listen on res, not req: IncomingMessage emits
@@ -76,9 +125,40 @@ const server = createServer(async function (req, res) {
   if (req.method === "GET" && req.url === "/api/ai/models") {
     return send(res, 200, { models: MODELS, default: MODELS[0].id, visionDefault: config.model });
   }
+  // first-run detection for the settings screen. Never returns the key itself.
+  if (req.method === "GET" && req.url === "/api/ai/status") {
+    return send(res, 200, {
+      configured: !!config.apiKey,
+      provider: provider,
+      keyHint: maskKey(config.apiKey),
+      providers: Object.keys(PROVIDER_PRESETS).map(function (id) {
+        return { id: id, label: PROVIDER_PRESETS[id].label, keysUrl: PROVIDER_PRESETS[id].keysUrl };
+      }),
+    });
+  }
+  if (req.method === "POST" && req.url === "/api/ai/config") {
+    if (!originOk(req)) return send(res, 403, { error: "cross-origin config writes are refused" });
+    try {
+      const body = await readJson(req);
+      if (!PROVIDER_PRESETS[body.provider]) return send(res, 400, { error: "unknown provider: " + String(body.provider).slice(0, 40) });
+      const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+      // an empty key when one is already loaded means "keep it, switch provider"
+      if (!apiKey && !config.apiKey) return send(res, 400, { error: "apiKey required" });
+      applyProvider(body.provider, apiKey);
+      try {
+        writeFileSync(CONFIG_FILE, JSON.stringify({ provider: provider, apiKey: config.apiKey }, null, 2), { mode: 0o600 });
+      } catch (e) {
+        return send(res, 500, { error: "settings applied but not saved: " + e.message });
+      }
+      console.log("settings updated: " + provider + " " + maskKey(config.apiKey));
+      return send(res, 200, { configured: true, provider: provider, keyHint: maskKey(config.apiKey), models: MODELS, default: MODELS[0].id, visionDefault: config.model });
+    } catch (e) {
+      return send(res, 500, { error: e && e.message ? e.message : "internal error" });
+    }
+  }
   if (req.method === "POST" && req.url === "/api/ai/diagram") {
     try {
-      if (!config.apiKey) return send(res, 500, { error: "AI_API_KEY is not set" });
+      if (!config.apiKey) return send(res, 503, { error: "no API key yet - add one in the AI panel's settings" });
       const body = await readJson(req);
       const text = typeof body.text === "string" ? body.text.trim() : "";
       const hasImage = typeof body.image === "string" && body.image.indexOf("data:image/") === 0;
@@ -102,7 +182,7 @@ const server = createServer(async function (req, res) {
   }
   if (req.method === "POST" && req.url === "/api/ai/chat") {
     try {
-      if (!config.apiKey) return send(res, 500, { error: "AI_API_KEY is not set" });
+      if (!config.apiKey) return send(res, 503, { error: "no API key yet - add one in the AI panel's settings" });
       const body = await readJson(req);
       const messages = Array.isArray(body.messages) ? body.messages : [];
       const tools = Array.isArray(body.tools) ? body.tools : undefined;
@@ -118,7 +198,7 @@ const server = createServer(async function (req, res) {
   // the agent's `capture` tool: screenshot in, words out (its brain has no vision)
   if (req.method === "POST" && req.url === "/api/ai/describe") {
     try {
-      if (!config.apiKey) return send(res, 500, { error: "AI_API_KEY is not set" });
+      if (!config.apiKey) return send(res, 503, { error: "no API key yet - add one in the AI panel's settings" });
       const body = await readJson(req);
       if (typeof body.image !== "string" || body.image.indexOf("data:image/") !== 0) {
         return send(res, 400, { error: "image (base64 data URL) required" });

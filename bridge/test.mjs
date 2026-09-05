@@ -1,7 +1,7 @@
 // Offline tests (no API key, no browser): the contract + request builder.
 import { validateSkeleton, DIAGRAM_SYSTEM_PROMPT } from "./diagram-contract.mjs";
 import { buildVisionRequest } from "./vision.mjs";
-import { AGENT_SYSTEM_PROMPT, AGENT_TOOLS, AGENT_MODES, systemPromptFor, parseModelList, trimMessages, dropIncompleteTurn } from "./agent-contract.mjs";
+import { AGENT_SYSTEM_PROMPT, AGENT_TOOLS, AGENT_MODES, systemPromptFor, parseModelList, trimMessages, dropIncompleteTurn, PROVIDER_PRESETS, maskKey } from "./agent-contract.mjs";
 import { bboxOf, expandSelection, textDescriptionOf, labelIndex, isBoundLabel, textOf, summarizeElement, centeredLabelPosition, toQueryRows, QUERY_COLUMNS, arrowBetween, positionBoundArrows, snapArrowEndpoints } from "./geometry.mjs";
 
 let pass = 0, fail = 0;
@@ -159,6 +159,29 @@ check("no orphaned tool result after trim", !trimmed.some(function (m) { return 
 check("incomplete tool_calls dropped", dropIncompleteTurn(convo.slice(0, 3)).length === 2);
 check("tool results without final answer dropped with their call", dropIncompleteTurn(convo.slice(0, 4)).length === 2);
 check("complete turn untouched", dropIncompleteTurn(convo).length === convo.length);
+
+// BYOK presets and key masking. A preset that does not parse into a usable
+// list would leave the picker empty and MODELS[0] undefined at runtime.
+Object.keys(PROVIDER_PRESETS).forEach(function (id) {
+  const p = PROVIDER_PRESETS[id];
+  const list = parseModelList(p.models, p.agentModel);
+  check(id + " preset parses to at least one model", list.length >= 1);
+  check(id + " preset offers a vision model", list.some(function (m) { return m.vision; }));
+  check(id + " preset agent model is on its own list", list.some(function (m) { return m.id === p.agentModel; }));
+  check(id + " preset vision model is on its list and flagged vision", list.some(function (m) { return m.id === p.visionModel && m.vision; }));
+  check(id + " preset base url is https", p.baseUrl.indexOf("https://") === 0);
+});
+
+// The one that matters: no input length may round-trip the whole key.
+const keySamples = ["", "a", "sk-1234", "sk-12345", "sk-123456789", "sk-proj-aaaaaaaaaaaaaaaaaaaa9f2c", "x".repeat(200)];
+check("maskKey never returns the full key", keySamples.every(function (k) { return k === "" || maskKey(k) !== k; }));
+check("maskKey reveals at most the last 4 characters", keySamples.every(function (k) {
+  const m = maskKey(k);
+  return m === "" || m === "…" || (m.length === 5 && k.slice(-4) === m.slice(1));
+}));
+check("maskKey hides short keys entirely", maskKey("sk-12345") === "…");
+check("maskKey on empty is empty", maskKey("") === "");
+check("maskKey handles non-strings", maskKey(undefined) === "" && maskKey(null) === "");
 
 console.log("");
 console.log(pass + " passed, " + fail + " failed");

@@ -392,3 +392,53 @@
   padding: 0.05rem 0.3rem;
   font-size: 0.8125rem;
 }
+
+/* BYOK settings: key input, save button, and the first-run banner. Same
+   Excalidraw variables as the rest of the panel, so dark mode is inherited. */
+.ai-sidebar__field input[type="password"] {
+  font: inherit;
+  color: var(--color-on-surface);
+  background: var(--input-bg-color);
+  border: 1px solid var(--input-border-color);
+  border-radius: var(--border-radius-lg);
+  padding: 0.45rem 0.5rem;
+}
+.ai-sidebar__field input[type="password"]:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.ai-sidebar__field a {
+  color: var(--color-primary);
+}
+.ai-sidebar__save {
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-primary-contrast, #fff);
+  background: var(--color-primary);
+  border: none;
+  border-radius: var(--border-radius-lg);
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+.ai-sidebar__save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ai-sidebar__rule {
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--default-border-color, var(--input-border-color));
+  margin: 0.25rem 0;
+}
+.ai-sidebar__banner {
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+  border: none;
+  border-radius: var(--border-radius-lg);
+  padding: 0.5rem 0.75rem;
+  margin: 0 0.75rem 0.5rem;
+  cursor: pointer;
+}

@@ -67,7 +67,7 @@ const MESSAGES_KEY = "excalidraw-ai-agent-messages";
 // query results accumulate every turn; past this the oldest turns are dropped whole
 const MESSAGES_BUDGET = 120000;
 
-export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", chatEndpoint = "/api/ai/chat", describeEndpoint = "/api/ai/describe", modelsEndpoint = "/api/ai/models", token = "", appendGap = 80 }) {
+export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", chatEndpoint = "/api/ai/chat", describeEndpoint = "/api/ai/describe", modelsEndpoint = "/api/ai/models", statusEndpoint = "/api/ai/status", configEndpoint = "/api/ai/config", token = "", appendGap = 80 }) {
   let draft = null; // { sourceIds:Set, draftIds:Set, sourceBbox, mode:"sketch"|"text" }
   const agent = { messages: [], snapshot: null }; // snapshot = scene before the last turn
   const headers = { "Content-Type": "application/json" };
@@ -622,6 +622,25 @@ export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", 
     return res.json(); // { models: [{ id, vision, maxTokens }], default }
   }
 
+  // BYOK: the key never round-trips to the browser, so status reports only
+  // whether one is loaded plus a masked hint.
+  async function agentStatus() {
+    const res = await fetch(statusEndpoint, { headers: headers });
+    if (!res.ok) throw new Error("could not load settings (" + res.status + ")");
+    return res.json(); // { configured, provider, keyHint, providers: [{ id, label, keysUrl }] }
+  }
+
+  async function agentSetup(providerId, apiKey) {
+    const res = await fetch(configEndpoint, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify({ provider: providerId, apiKey: apiKey || "" }),
+    });
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(data.error || "could not save settings (" + res.status + ")");
+    return data; // same shape as status, plus the new model list
+  }
+
   function configure(opts) {
     if (opts && typeof opts.visionModel === "string") prefs.visionModel = opts.visionModel;
   }
@@ -634,6 +653,6 @@ export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", 
     generateFromText: generateFromText,
     accept: accept,
     reject: reject,
-    agent: { send: agentSend, reset: agentReset, revert: agentRevert, models: agentModels },
+    agent: { send: agentSend, reset: agentReset, revert: agentRevert, models: agentModels, status: agentStatus, setup: agentSetup },
   };
 }

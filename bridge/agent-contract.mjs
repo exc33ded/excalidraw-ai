@@ -216,3 +216,34 @@ export function dropIncompleteTurn(messages) {
   }
   return messages;
 }
+
+// BYOK: the two providers the settings screen offers by name. The client sends
+// a preset *name*, never a base URL — an attacker who can reach the config
+// route must not be able to repoint the bridge at their own collector.
+export const PROVIDER_PRESETS = {
+  openai: {
+    label: "OpenAI",
+    baseUrl: "https://api.openai.com/v1",
+    models: "gpt-4o-mini:16000,gpt-4o:vision:16000",
+    agentModel: "gpt-4o-mini",
+    visionModel: "gpt-4o",
+    keysUrl: "https://platform.openai.com/api-keys",
+  },
+  deepseek: {
+    label: "DeepSeek",
+    baseUrl: "https://api.deepseek.com/v1",
+    models: "deepseek-v4-flash,deepseek-v4-pro,deepseek-v4-flash-vision-exp:vision",
+    agentModel: "deepseek-v4-flash",
+    visionModel: "deepseek-v4-flash-vision-exp",
+    keysUrl: "https://platform.deepseek.com/api_keys",
+  },
+};
+
+// A key is never sent back to the browser; this is all the UI gets to confirm
+// which key is loaded. Reveals at most the last 4 characters, and nothing at
+// all for a key short enough that 4 characters would be most of it.
+export function maskKey(key) {
+  const s = String(key || "");
+  if (!s) return "";
+  return s.length > 8 ? "…" + s.slice(-4) : "…";
+}

@@ -34,6 +34,11 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
   const [busy, setBusy] = useState(false); // false | step label
   const [models, setModels] = useState(null); // null = loading, [] = failed
   const [loadError, setLoadError] = useState("");
+  const [status, setStatus] = useState(null); // { configured, provider, keyHint, providers }
+  const [keyDraft, setKeyDraft] = useState("");
+  const [providerDraft, setProviderDraft] = useState("");
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [keyError, setKeyError] = useState("");
   const [canRevert, setCanRevert] = useState(false);
   const [selectedCount, setSelectedCount] = useState(0);
   const logRef = useRef(null);
@@ -53,19 +58,42 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
     setSettings((s) => { const next = Object.assign({}, s, patch); store(SETTINGS_KEY, next); return next; });
   }, []);
 
-  useEffect(() => {
-    if (!ai) return;
-    ai.agent.models().then((r) => {
-      setModels(r.models);
-      setLoadError("");
+  // shared by first load and by saving a key, which swaps the whole list
+  const applyModelList = useCallback((r) => {
+    setModels(r.models);
+    setLoadError("");
+    setSettings((s) => {
       const has = (id) => r.models.some((m) => m.id === id);
       const vision = r.models.filter((m) => m.vision);
-      update({
-        chat: has(settings.chat) ? settings.chat : r.default,
-        vision: has(settings.vision) ? settings.vision : (r.visionDefault || (vision[0] && vision[0].id) || ""),
+      const next = Object.assign({}, s, {
+        chat: has(s.chat) ? s.chat : r.default,
+        vision: has(s.vision) ? s.vision : (r.visionDefault || (vision[0] && vision[0].id) || ""),
       });
-    }).catch((e) => { setModels([]); setLoadError(e.message); });
-  }, [ai]); // eslint-disable-line react-hooks/exhaustive-deps
+      store(SETTINGS_KEY, next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!ai) return;
+    ai.agent.models().then(applyModelList).catch((e) => { setModels([]); setLoadError(e.message); });
+    ai.agent.status().then(setStatus).catch(() => {});
+  }, [ai, applyModelList]);
+
+  const saveKey = useCallback(async (providerId) => {
+    setKeyBusy(true);
+    setKeyError("");
+    try {
+      const r = await ai.agent.setup(providerId, keyDraft);
+      setStatus((s) => Object.assign({}, s, { configured: r.configured, provider: r.provider, keyHint: r.keyHint }));
+      setKeyDraft("");
+      applyModelList(r);
+    } catch (e) {
+      setKeyError(e.message);
+    } finally {
+      setKeyBusy(false);
+    }
+  }, [ai, keyDraft, applyModelList]);
 
   useEffect(() => { if (ai) ai.configure({ visionModel: settings.vision }); }, [ai, settings.vision]);
 
@@ -143,6 +171,14 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
     tutor: ["teach me how transformers work", "I want to learn system design basics", "explain TCP handshakes to me step by step"],
   }[mode];
   const visionModels = (models || []).filter((m) => m.vision);
+  const providers = (status && status.providers) || [];
+  const activeProvider = providerDraft || (status && status.provider) || (providers[0] && providers[0].id) || "";
+  const keysUrl = (providers.find((p) => p.id === activeProvider) || {}).keysUrl || "";
+  const savedProviderLabel = (providers.find((p) => p.id === (status && status.provider)) || {}).label || "";
+  // switching provider with a key already saved reuses it; the server keeps the
+  // old key when apiKey comes back empty
+  const canSaveKey = !keyBusy && !!activeProvider && (!!keyDraft.trim() || !!(status && status.configured));
+  const needsKey = !!status && !status.configured;
 
   return (
     <Sidebar
@@ -178,6 +214,38 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
       {view === "settings" ? (
         <div className="ai-sidebar__settings">
           <label className="ai-sidebar__field">
+            <span>Provider</span>
+            <small>
+              {status && status.configured
+                ? "Key saved for " + (savedProviderLabel || status.provider) + " · " + status.keyHint
+                : "Your key is stored on this machine and only ever sent to the provider."}
+            </small>
+            <select value={activeProvider} onChange={(e) => setProviderDraft(e.target.value)} disabled={keyBusy || !providers.length}>
+              {providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </label>
+          <label className="ai-sidebar__field">
+            <span>API key</span>
+            <small>
+              {keysUrl ? <>Get one at <a href={keysUrl} target="_blank" rel="noreferrer">{keysUrl.replace("https://", "")}</a>.</> : "Paste the key from your provider."}
+            </small>
+            <input
+              type="password"
+              value={keyDraft}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={status && status.configured ? "Saved · paste a new key to replace" : "sk-..."}
+              onChange={(e) => setKeyDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && canSaveKey) { e.preventDefault(); saveKey(activeProvider); } }}
+              disabled={keyBusy}
+            />
+          </label>
+          <button className="ai-sidebar__save" onClick={() => saveKey(activeProvider)} disabled={!canSaveKey}>
+            {keyBusy ? "Saving…" : status && status.configured ? "Update key" : "Save key"}
+          </button>
+          {keyError && <p className="ai-sidebar__hint ai-sidebar__hint--error">{keyError}</p>}
+          <hr className="ai-sidebar__rule" />
+          <label className="ai-sidebar__field">
             <span>Chat model</span>
             <small>Runs the agent loop and edits the canvas.</small>
             <select value={settings.chat} onChange={(e) => update({ chat: e.target.value })} disabled={!!busy || !models}>
@@ -196,11 +264,16 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
           )}
           {loadError && <p className="ai-sidebar__hint ai-sidebar__hint--error">{loadError}</p>}
           <p className="ai-sidebar__hint">
-            The list comes from <code>AI_MODELS</code> in <code>bridge/.env</code>; flag vision-capable entries with <code>:vision</code>.
+            Picking a provider sets its model list. To offer different models, set <code>AI_MODELS</code> in <code>bridge/.env</code> (<code>id:vision:maxTokens</code>) and restart the bridge.
           </p>
         </div>
       ) : (
         <>
+          {needsKey && (
+            <button className="ai-sidebar__banner" onClick={() => setView("settings")}>
+              Add an API key to get started →
+            </button>
+          )}
           <div className="ai-sidebar__log" ref={logRef}>
             {chat.length === 0 && (
               <div className="ai-sidebar__empty">
