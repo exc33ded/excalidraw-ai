@@ -177,14 +177,15 @@ export function parseModelList(str, fallbackId) {
     const parts = raw.trim().split(":");
     const id = parts.shift();
     if (!id) return;
-    const m = { id: id, vision: false, maxTokens: 32000 };
+    const m = { id: id, vision: false, reasoning: false, maxTokens: 32000 };
     parts.forEach(function (p) {
       if (p === "vision") m.vision = true;
+      else if (p === "reasoning") m.reasoning = true;
       else if (/^\d+$/.test(p)) m.maxTokens = Number(p);
     });
     out.push(m);
   });
-  if (!out.length && fallbackId) out.push({ id: fallbackId, vision: false, maxTokens: 32000 });
+  if (!out.length && fallbackId) out.push({ id: fallbackId, vision: false, reasoning: false, maxTokens: 32000 });
   return out;
 }
 
@@ -232,7 +233,7 @@ export const PROVIDER_PRESETS = {
   deepseek: {
     label: "DeepSeek",
     baseUrl: "https://api.deepseek.com/v1",
-    models: "deepseek-v4-flash,deepseek-v4-pro,deepseek-v4-flash-vision-exp:vision",
+    models: "deepseek-v4-flash:reasoning,deepseek-v4-pro:reasoning,deepseek-v4-flash-vision-exp:vision:reasoning",
     agentModel: "deepseek-v4-flash",
     visionModel: "deepseek-v4-flash-vision-exp",
     keysUrl: "https://platform.deepseek.com/api_keys",
@@ -286,7 +287,7 @@ export function mergeDiscoveredModels(ids, presetModels) {
     const reasoning = looksReasoning(id);
     const hit = known.get(id);
     // a known id keeps the preset's verified vision flag and budget
-    if (hit) out.push({ id: id, vision: hit.vision, reasoning: reasoning, maxTokens: hit.maxTokens, known: true });
+    if (hit) out.push({ id: id, vision: hit.vision, reasoning: hit.reasoning || reasoning, maxTokens: hit.maxTokens, known: true });
     else out.push({ id: id, vision: looksVision(id), reasoning: reasoning, maxTokens: reasoning ? REASONING_MAX_TOKENS : DISCOVERED_MAX_TOKENS, known: false });
   });
   out.sort(function (a, b) { return (b.known ? 1 : 0) - (a.known ? 1 : 0) || a.id.localeCompare(b.id); });

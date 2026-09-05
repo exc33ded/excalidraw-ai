@@ -211,6 +211,16 @@ check("discovery without a preset still classifies", mergeDiscoveredModels(["my-
 const textOnly = mergeDiscoveredModels(["tiny-chat-1b", "another-text-model"], "");
 check("a text-only endpoint yields no vision model", textOnly.length === 2 && !textOnly.some(function (m) { return m.vision; }));
 
+// A preset saying "reasoning" beats the id heuristic, which does not match
+// the DeepSeek v4 names even though those are reasoning models.
+const dsList = parseModelList(PROVIDER_PRESETS.deepseek.models, PROVIDER_PRESETS.deepseek.agentModel);
+check("reasoning parses out of the model list format", dsList.every(function (m) { return m.reasoning === true; }));
+check("reasoning defaults to false", parseModelList("plain-model")[0].reasoning === false);
+check("vision and reasoning coexist on one entry", parseModelList("m:vision:reasoning:9000")[0].vision === true && parseModelList("m:vision:reasoning:9000")[0].reasoning === true && parseModelList("m:vision:reasoning:9000")[0].maxTokens === 9000);
+const dsDiscovered = mergeDiscoveredModels(["deepseek-v4-flash", "deepseek-v4-flash-vision-exp"], PROVIDER_PRESETS.deepseek.models);
+check("a preset's reasoning flag survives discovery", dsDiscovered.every(function (m) { return m.reasoning === true; }));
+check("openai preset models are not marked reasoning", parseModelList(PROVIDER_PRESETS.openai.models).every(function (m) { return m.reasoning === false; }));
+
 console.log("");
 console.log(pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
