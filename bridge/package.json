@@ -23,7 +23,7 @@
     "start": "node server.mjs",
     "test": "node test.mjs",
     "build": "npm --prefix host run build",
-    "prepack": "npm --prefix host run build"
+    "prepack": "npm --prefix host install && npm --prefix host run build"
   },
   "engines": {
     "node": ">=20.12"

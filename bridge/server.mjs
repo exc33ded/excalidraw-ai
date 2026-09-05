@@ -309,6 +309,22 @@ const server = createServer(async function (req, res) {
   return send(res, 404, { error: "not found" });
 });
 
+// The npx audience cannot read a Node stack trace, and a busy port is the
+// most likely first-run failure (another copy, or the dev bridge).
+server.on("error", function (e) {
+  if (e.code === "EADDRINUSE") {
+    console.error("Port " + PORT + " is already in use.");
+    console.error("Something else is running there - close it, or choose another port:");
+    console.error("  PORT=8788 npx excalidraw-ai");
+  } else if (e.code === "EACCES") {
+    console.error("Not allowed to listen on port " + PORT + ". Try a port above 1024:");
+    console.error("  PORT=8788 npx excalidraw-ai");
+  } else {
+    console.error("Could not start the server: " + (e.message || e.code));
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, HOST, async function () {
   const url = "http://" + HOST + ":" + PORT;
   const { stat } = await import("node:fs/promises");
