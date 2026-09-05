@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 import { callVisionModel, callChat } from "./vision.mjs";
 import { validateSkeleton, DIAGRAM_GENERATION_PROMPT, DESCRIBE_SYSTEM_PROMPT } from "./diagram-contract.mjs";
-import { parseModelList, PROVIDER_PRESETS, maskKey } from "./agent-contract.mjs";
+import { parseModelList, PROVIDER_PRESETS, maskKey, mergeDiscoveredModels } from "./agent-contract.mjs";
 
 try { process.loadEnvFile?.(new URL("./.env", import.meta.url)); } catch (e) {}
 
@@ -50,11 +50,51 @@ function applyProvider(name, apiKey) {
   return true;
 }
 
+// A tested endpoint reports its own models, so the list replaces the preset's
+// rather than extending it. No phantom vision entry here: if the endpoint
+// serves no vision model, config.model stays empty and the vision routes say
+// so, instead of offering an id the provider would 404 on.
+function applyDiscovered(baseUrl, apiKey, models, providerName) {
+  config.baseUrl = baseUrl;
+  if (apiKey) config.apiKey = apiKey;
+  MODELS = models;
+  const vision = models.find(function (m) { return m.vision; });
+  config.model = vision ? vision.id : "";
+  config.agentModel = models[0].id;
+  provider = providerName || "custom";
+}
+
 // a saved key wins over .env: it is the one the user typed most recently
 try {
   const saved = JSON.parse(readFileSync(CONFIG_FILE, "utf8"));
-  if (saved && applyProvider(saved.provider, saved.apiKey)) console.log("loaded saved settings: " + saved.provider + " " + maskKey(config.apiKey));
+  if (saved && Array.isArray(saved.models) && saved.models.length) {
+    applyDiscovered(saved.baseUrl, saved.apiKey, saved.models, saved.provider);
+    console.log("loaded saved settings: " + provider + " " + maskKey(config.apiKey) + ", " + MODELS.length + " models");
+  } else if (saved && applyProvider(saved.provider, saved.apiKey)) {
+    console.log("loaded saved settings: " + saved.provider + " " + maskKey(config.apiKey));
+  }
 } catch (e) {}
+
+// One GET does both jobs the settings screen needs: prove the key works and
+// report what the endpoint serves. The status code is the whole diagnostic.
+// Deliberately not AI_TIMEOUT_MS - 180s on a key test reads as a hang.
+const TEST_TIMEOUT_MS = 10000;
+
+async function discoverModels(baseUrl, apiKey) {
+  const url = baseUrl.replace(/\/+$/, "") + "/models";
+  let res;
+  try {
+    res = await fetch(url, { headers: { Authorization: "Bearer " + apiKey }, signal: AbortSignal.timeout(TEST_TIMEOUT_MS) });
+  } catch (e) {
+    throw new Error("could not reach " + url + " (" + (e.name === "TimeoutError" ? "timed out after 10s" : e.message) + ")");
+  }
+  if (res.status === 401 || res.status === 403) throw new Error("the provider rejected this key (" + res.status + ")");
+  if (!res.ok) throw new Error("the endpoint answered " + res.status + " - check the base URL");
+  const data = await res.json().catch(function () { return null; });
+  const list = data && (Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : null);
+  if (!list) throw new Error("the endpoint did not return a model list");
+  return list.map(function (m) { return typeof m === "string" ? m : m && m.id; }).filter(Boolean);
+}
 
 // body.model for the vision routes: must be on the list AND vision-capable
 function visionModelFor(body) {
@@ -136,17 +176,47 @@ const server = createServer(async function (req, res) {
       }),
     });
   }
+  // Try a key + endpoint without saving anything, and report what it serves.
+  if (req.method === "POST" && req.url === "/api/ai/test") {
+    if (!originOk(req)) return send(res, 403, { error: "cross-origin config writes are refused" });
+    try {
+      const body = await readJson(req);
+      const preset = PROVIDER_PRESETS[body.provider];
+      const baseUrl = preset ? preset.baseUrl : String(body.baseUrl || "").trim();
+      if (!/^https?:\/\//i.test(baseUrl)) return send(res, 400, { error: "a base URL starting with http:// or https:// is required" });
+      // an empty key means "test the one already saved"
+      const apiKey = typeof body.apiKey === "string" && body.apiKey.trim() ? body.apiKey.trim() : config.apiKey;
+      if (!apiKey) return send(res, 400, { error: "apiKey required" });
+      const ids = await discoverModels(baseUrl, apiKey);
+      const models = mergeDiscoveredModels(ids, preset ? preset.models : "");
+      if (!models.length) return send(res, 422, { error: "the key works, but this endpoint serves no chat models (saw " + ids.length + " entries)" });
+      return send(res, 200, { ok: true, baseUrl: baseUrl, models: models, found: ids.length });
+    } catch (e) {
+      return send(res, 400, { error: e && e.message ? e.message : "test failed" });
+    }
+  }
   if (req.method === "POST" && req.url === "/api/ai/config") {
     if (!originOk(req)) return send(res, 403, { error: "cross-origin config writes are refused" });
     try {
       const body = await readJson(req);
-      if (!PROVIDER_PRESETS[body.provider]) return send(res, 400, { error: "unknown provider: " + String(body.provider).slice(0, 40) });
       const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
       // an empty key when one is already loaded means "keep it, switch provider"
       if (!apiKey && !config.apiKey) return send(res, 400, { error: "apiKey required" });
-      applyProvider(body.provider, apiKey);
+      // a tested endpoint sends back the list it reported; otherwise it is a preset
+      if (Array.isArray(body.models) && body.models.length) {
+        const baseUrl = String(body.baseUrl || "").trim();
+        if (!/^https?:\/\//i.test(baseUrl)) return send(res, 400, { error: "a base URL starting with http:// or https:// is required" });
+        const models = body.models
+          .filter(function (m) { return m && typeof m.id === "string"; })
+          .map(function (m) { return { id: m.id, vision: !!m.vision, reasoning: !!m.reasoning, maxTokens: Number(m.maxTokens) > 0 ? Number(m.maxTokens) : 8000 }; });
+        if (!models.length) return send(res, 400, { error: "models must be a non-empty list of { id }" });
+        applyDiscovered(baseUrl, apiKey, models, PROVIDER_PRESETS[body.provider] ? body.provider : "custom");
+      } else {
+        if (!PROVIDER_PRESETS[body.provider]) return send(res, 400, { error: "unknown provider: " + String(body.provider).slice(0, 40) });
+        applyProvider(body.provider, apiKey);
+      }
       try {
-        writeFileSync(CONFIG_FILE, JSON.stringify({ provider: provider, apiKey: config.apiKey }, null, 2), { mode: 0o600 });
+        writeFileSync(CONFIG_FILE, JSON.stringify({ provider: provider, apiKey: config.apiKey, baseUrl: config.baseUrl, models: MODELS }, null, 2), { mode: 0o600 });
       } catch (e) {
         return send(res, 500, { error: "settings applied but not saved: " + e.message });
       }
@@ -166,7 +236,7 @@ const server = createServer(async function (req, res) {
         return send(res, 400, { error: "image (base64 data URL) or text description required" });
       }
       const model = visionModelFor(body);
-      if (!model) return send(res, 400, { error: "not a vision model on the allowlist: " + String(body.model).slice(0, 80) });
+      if (!model) return send(res, 400, { error: body.model ? "not a vision model on the allowlist: " + String(body.model).slice(0, 80) : "this endpoint has no vision model, so Refine and capture are unavailable" });
       let raw;
       if (text) {
         raw = await callVisionModel({ image: hasImage ? body.image : undefined, prompt: text, system: DIAGRAM_GENERATION_PROMPT, config, model, signal: upstreamSignal(req, res) });
@@ -205,7 +275,7 @@ const server = createServer(async function (req, res) {
       }
       const question = typeof body.question === "string" ? body.question.trim() : "";
       const model = visionModelFor(body);
-      if (!model) return send(res, 400, { error: "not a vision model on the allowlist: " + String(body.model).slice(0, 80) });
+      if (!model) return send(res, 400, { error: body.model ? "not a vision model on the allowlist: " + String(body.model).slice(0, 80) : "this endpoint has no vision model, so Refine and capture are unavailable" });
       const raw = await callVisionModel({
         image: body.image,
         prompt: question || "Describe this canvas.",

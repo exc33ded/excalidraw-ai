@@ -1,7 +1,7 @@
 // Offline tests (no API key, no browser): the contract + request builder.
 import { validateSkeleton, DIAGRAM_SYSTEM_PROMPT } from "./diagram-contract.mjs";
 import { buildVisionRequest } from "./vision.mjs";
-import { AGENT_SYSTEM_PROMPT, AGENT_TOOLS, AGENT_MODES, systemPromptFor, parseModelList, trimMessages, dropIncompleteTurn, PROVIDER_PRESETS, maskKey } from "./agent-contract.mjs";
+import { AGENT_SYSTEM_PROMPT, AGENT_TOOLS, AGENT_MODES, systemPromptFor, parseModelList, trimMessages, dropIncompleteTurn, PROVIDER_PRESETS, maskKey, mergeDiscoveredModels, DISCOVERED_MAX_TOKENS, REASONING_MAX_TOKENS } from "./agent-contract.mjs";
 import { bboxOf, expandSelection, textDescriptionOf, labelIndex, isBoundLabel, textOf, summarizeElement, centeredLabelPosition, toQueryRows, QUERY_COLUMNS, arrowBetween, positionBoundArrows, snapArrowEndpoints } from "./geometry.mjs";
 
 let pass = 0, fail = 0;
@@ -182,6 +182,34 @@ check("maskKey reveals at most the last 4 characters", keySamples.every(function
 check("maskKey hides short keys entirely", maskKey("sk-12345") === "…");
 check("maskKey on empty is empty", maskKey("") === "");
 check("maskKey handles non-strings", maskKey(undefined) === "" && maskKey(null) === "");
+
+// Model discovery: GET /v1/models reports ids only, so the merge is what
+// supplies vision flags and token budgets.
+const discovered = mergeDiscoveredModels(
+  ["text-embedding-3-small", "gpt-4o", "whisper-1", "o3-mini", "some-llm-7b", "dall-e-3", "gpt-4o", "tts-1", ""],
+  PROVIDER_PRESETS.openai.models
+);
+const byId = function (id) { return discovered.find(function (m) { return m.id === id; }); };
+check("discovery drops embedding/audio/image models", !byId("text-embedding-3-small") && !byId("whisper-1") && !byId("dall-e-3") && !byId("tts-1"));
+check("discovery keeps chat models", !!byId("gpt-4o") && !!byId("o3-mini") && !!byId("some-llm-7b"));
+check("discovery dedupes repeated ids", discovered.filter(function (m) { return m.id === "gpt-4o"; }).length === 1);
+check("discovery ignores blank ids", discovered.every(function (m) { return !!m.id; }));
+check("a known id keeps the preset's verified flags", byId("gpt-4o").vision === true && byId("gpt-4o").maxTokens === 16000);
+check("a known id is marked known", byId("gpt-4o").known === true && byId("some-llm-7b").known === false);
+check("known models sort ahead of guesses", discovered[0].known === true);
+check("a reasoning-looking id gets the large budget", byId("o3-mini").reasoning === true && byId("o3-mini").maxTokens === REASONING_MAX_TOKENS);
+// the blocker: 32000 is a 400 on most non-reasoning models, so an unknown id
+// must never inherit the reasoning budget
+check("an unknown non-reasoning id gets the conservative budget", byId("some-llm-7b").maxTokens === DISCOVERED_MAX_TOKENS);
+check("conservative budget is well below the reasoning one", DISCOVERED_MAX_TOKENS < REASONING_MAX_TOKENS);
+check("no discovered model silently gets 32000 without the reasoning flag", discovered.every(function (m) { return m.maxTokens !== REASONING_MAX_TOKENS || m.reasoning || m.known; }));
+check("discovery on an empty list is empty", mergeDiscoveredModels([], "").length === 0 && mergeDiscoveredModels(null, "").length === 0);
+check("discovery without a preset still classifies", mergeDiscoveredModels(["my-vision-model", "plain-model"], "").length === 2);
+
+// A text-only endpoint must report no vision model rather than inventing one:
+// the server leaves config.model empty and the vision routes say so.
+const textOnly = mergeDiscoveredModels(["tiny-chat-1b", "another-text-model"], "");
+check("a text-only endpoint yields no vision model", textOnly.length === 2 && !textOnly.some(function (m) { return m.vision; }));
 
 console.log("");
 console.log(pass + " passed, " + fail + " failed");

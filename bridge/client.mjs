@@ -67,7 +67,7 @@ const MESSAGES_KEY = "excalidraw-ai-agent-messages";
 // query results accumulate every turn; past this the oldest turns are dropped whole
 const MESSAGES_BUDGET = 120000;
 
-export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", chatEndpoint = "/api/ai/chat", describeEndpoint = "/api/ai/describe", modelsEndpoint = "/api/ai/models", statusEndpoint = "/api/ai/status", configEndpoint = "/api/ai/config", token = "", appendGap = 80 }) {
+export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", chatEndpoint = "/api/ai/chat", describeEndpoint = "/api/ai/describe", modelsEndpoint = "/api/ai/models", statusEndpoint = "/api/ai/status", configEndpoint = "/api/ai/config", testEndpoint = "/api/ai/test", token = "", appendGap = 80 }) {
   let draft = null; // { sourceIds:Set, draftIds:Set, sourceBbox, mode:"sketch"|"text" }
   const agent = { messages: [], snapshot: null }; // snapshot = scene before the last turn
   const headers = { "Content-Type": "application/json" };
@@ -630,11 +630,23 @@ export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", 
     return res.json(); // { configured, provider, keyHint, providers: [{ id, label, keysUrl }] }
   }
 
-  async function agentSetup(providerId, apiKey) {
+  // try a key + endpoint without saving; resolves with what the provider serves
+  async function agentTest(opts) {
+    const res = await fetch(testEndpoint, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify({ provider: opts.provider || "", baseUrl: opts.baseUrl || "", apiKey: opts.apiKey || "" }),
+    });
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(data.error || "test failed (" + res.status + ")");
+    return data; // { ok, baseUrl, models: [{ id, vision, reasoning, maxTokens }], found }
+  }
+
+  async function agentSetup(opts) {
     const res = await fetch(configEndpoint, {
       method: "POST",
       headers: headers,
-      body: JSON.stringify({ provider: providerId, apiKey: apiKey || "" }),
+      body: JSON.stringify({ provider: opts.provider || "", apiKey: opts.apiKey || "", baseUrl: opts.baseUrl || "", models: opts.models || undefined }),
     });
     const data = await res.json().catch(function () { return {}; });
     if (!res.ok) throw new Error(data.error || "could not save settings (" + res.status + ")");
@@ -653,6 +665,6 @@ export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", 
     generateFromText: generateFromText,
     accept: accept,
     reject: reject,
-    agent: { send: agentSend, reset: agentReset, revert: agentRevert, models: agentModels, status: agentStatus, setup: agentSetup },
+    agent: { send: agentSend, reset: agentReset, revert: agentRevert, models: agentModels, status: agentStatus, setup: agentSetup, test: agentTest },
   };
 }

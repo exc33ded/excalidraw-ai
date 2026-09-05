@@ -112,6 +112,55 @@ Both come from `GET /api/ai/models`; the vision picker only lists entries
 flagged `:vision`, and the server rejects a non-vision model on the vision
 routes with a 400. Choices persist in `excalidraw-ai-settings`.
 
+**BYOK: the key is set from the panel, not `.env`.** Editing `bridge/.env` by
+hand rules out anyone who has never opened a terminal, which is the audience
+for a downloadable build. `vision.mjs` already reads `config.apiKey` *per
+call*, so making it settable at runtime needed no refactor — only `let MODELS`
+and somewhere to persist the choice (`bridge/config.json`, gitignored, 0600,
+and it wins over `.env` because it is what the user typed most recently).
+
+    GET  /api/ai/status   { configured, provider, keyHint, providers[] }
+    POST /api/ai/test     { provider | baseUrl, apiKey } -> what it serves
+    POST /api/ai/config   { provider | baseUrl + models, apiKey } -> saves
+
+The key is **never** returned by any route; `maskKey` reveals at most the last
+four characters, and nothing at all below nine (`test.mjs` pins this).
+
+**Test and discover are one call.** `GET {baseUrl}/models` with the key proves
+the key works *and* reports the model list, and the status code is the whole
+diagnostic: 401/403 = bad key, other non-2xx = wrong base URL, network error =
+unreachable. It uses a 10 s timeout, deliberately **not** `AI_TIMEOUT_MS` —
+180 s on a key test reads as a hang.
+
+Two things that list cannot tell you, and how `mergeDiscoveredModels` fills
+them in (all pure, all in `agent-contract.mjs`, all covered by `test.mjs`):
+
+- **No vision or reasoning flag, no token budget.** Discovery supplies only
+  candidate ids; `PROVIDER_PRESETS` supplies verified flags for ids it knows
+  (a discovered `gpt-4o` keeps `vision:true, maxTokens:16000`), and unknown
+  ids fall back to id heuristics. Non-chat ids (embeddings, whisper, TTS,
+  image, realtime) are filtered out, or the chat picker fills with them.
+- **An unknown id must not inherit the 32000 budget.** That figure suits
+  reasoning models and is a 400 on most others, so unknown ids get 8000 unless
+  the id looks like a reasoning model. A test pins that no discovered entry
+  reaches 32000 without being flagged reasoning or known.
+
+**A custom endpoint with no vision model says so.** `applyDiscovered` leaves
+`config.model` empty rather than pushing a phantom id the provider would 404
+on, and `/describe` and `/diagram` answer *"this endpoint has no vision model,
+so Refine and capture are unavailable."* The preset path still guarantees a
+vision entry, which is also what keeps `MODELS[0]` defined.
+
+**The config and test routes are a write boundary the read routes are not.**
+With the default `*` CORS, any page open in the user's browser could otherwise
+POST a key to the loopback port — or, before the endpoint was user-supplied,
+repoint `baseUrl` at a collector. `originOk()` refuses a cross-origin write
+(verified: `Origin: https://evil.example` → 403). A missing `Origin` is
+allowed, which is what lets curl and a future Electron main process work — so
+it defends against web pages, **not** against another local process. Routes
+now answer **503** (not 500) when no key is set, so the panel can tell "needs
+setup" from "broke" and show its first-run banner.
+
 **Modes.** Three tabs above the input: Assistant (edit the canvas, 1-2
 sentence replies), Guide (planning: draw the plan, then a structured written
 overview), Tutor (draw a roadmap, confirm it and ask prior knowledge, teach one
@@ -154,7 +203,16 @@ tutor conversation on HTTPS behaved as specified, including the
 
 **Verified against the live model / test suites:**
 
-- 50 offline tests pass (`node bridge/test.mjs`); host builds clean.
+- 94 offline tests pass (`node bridge/test.mjs`); host builds clean.
+- BYOK, against mock OpenAI-compatible providers on loopback: discovery turned
+  7 reported ids into 4 usable models (embeddings, whisper and dall-e filtered,
+  a duplicate deduped, `o3-mini` flagged reasoning at 32000, unknown ids at
+  8000); a 401 endpoint gave "the provider rejected this key (401)"; an
+  unreachable one named the URL it tried; a cross-origin POST to `/test` and
+  `/config` both 403'd; a text-only endpoint saved with `visionDefault: ""`
+  and `/describe` then returned the no-vision-model message instead of a
+  phantom id; the saved provider, key, baseUrl and model list survived a
+  restart ("loaded saved settings: custom …1234, 2 models").
 - 18 browser tests pass (`node bridge/browser-test.mjs`, headless Chrome via
   `puppeteer-core`, `CHROME=` to point at the binary): panel renders inside
   `.excalidraw`; dark mode follows Excalidraw's toggle; `r`/Delete typed in the
@@ -194,6 +252,18 @@ tutor conversation on HTTPS behaved as specified, including the
 - The selection chip (only eyeballed in a screenshot). The resize grip is
   gone; Excalidraw's Sidebar has a fixed width.
 - `AI_TIMEOUT_MS` firing against a genuinely hung provider.
+- BYOK against a **real** provider. Everything above used mock `/v1/models`
+  servers on loopback. Nobody has yet pasted a live OpenAI or DeepSeek key
+  into the panel and run a turn on the discovered list.
+- The reasoning and vision **heuristics**. They are regex guesses over model
+  ids and will misfire on names nobody has seen. The honest upgrade is to read
+  reasoning tokens back from the chat response's `usage` block after the first
+  real turn and let the observed value overwrite the guess — `callChat`
+  currently returns only `message`, so that needs plumbing. Until then a wrong
+  guess costs a bad token budget, which surfaces as a 400 or a truncated reply.
+- The settings screen itself was never opened in a browser this session; the
+  routes behind it were exercised with curl and the host build is clean, but
+  the form has not been clicked through.
 
 ---
 

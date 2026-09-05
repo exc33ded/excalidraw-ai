@@ -247,3 +247,48 @@ export function maskKey(key) {
   if (!s) return "";
   return s.length > 8 ? "…" + s.slice(-4) : "…";
 }
+
+// ---------------------------------------------------------------------------
+// Model discovery. GET /v1/models returns only { id, object, created,
+// owned_by } - no vision flag, no reasoning flag, no token budget - so a raw
+// list would fill the chat picker with embedding and TTS models and leave the
+// vision picker guessing. Discovery supplies the candidate ids; the presets
+// supply verified flags for the ids they know; the rest fall back to guesses
+// plus a deliberately small budget.
+// ---------------------------------------------------------------------------
+
+// not chat models, whatever else they are
+const NOT_CHAT = /embedding|whisper|tts|dall-e|moderation|rerank|audio|realtime|speech|image-\d|transcribe/i;
+const LOOKS_VISION = /vision|gpt-4o|gpt-4\.1|gpt-5|o3|o4|claude|gemini|llava|pixtral|maverick|scout/i;
+const LOOKS_REASONING = /(^|[-/])o[134]([-.]|$)|reason|deepseek-r|thinking|gpt-5|qwq|magistral/i;
+
+// A reasoning model bills reasoning_tokens against max_tokens before emitting
+// any content (measured 2966..7897 on one prompt here), so it needs a large
+// budget. 32000 is a 400 on most non-reasoning models, hence the split.
+export const REASONING_MAX_TOKENS = 32000;
+export const DISCOVERED_MAX_TOKENS = 8000;
+
+export function looksReasoning(id) { return LOOKS_REASONING.test(String(id || "")); }
+export function looksVision(id) { return LOOKS_VISION.test(String(id || "")); }
+export function isChatModel(id) { return !!id && !NOT_CHAT.test(String(id)); }
+
+// ids: what the provider reported. presetModels: the matching preset's model
+// string, when the endpoint is a known provider - its flags win over guesses.
+export function mergeDiscoveredModels(ids, presetModels) {
+  const known = new Map();
+  parseModelList(presetModels, "").forEach(function (m) { known.set(m.id, m); });
+  const seen = new Set();
+  const out = [];
+  (ids || []).forEach(function (raw) {
+    const id = String(raw || "").trim();
+    if (!id || seen.has(id) || !isChatModel(id)) return;
+    seen.add(id);
+    const reasoning = looksReasoning(id);
+    const hit = known.get(id);
+    // a known id keeps the preset's verified vision flag and budget
+    if (hit) out.push({ id: id, vision: hit.vision, reasoning: reasoning, maxTokens: hit.maxTokens, known: true });
+    else out.push({ id: id, vision: looksVision(id), reasoning: reasoning, maxTokens: reasoning ? REASONING_MAX_TOKENS : DISCOVERED_MAX_TOKENS, known: false });
+  });
+  out.sort(function (a, b) { return (b.known ? 1 : 0) - (a.known ? 1 : 0) || a.id.localeCompare(b.id); });
+  return out;
+}

@@ -37,6 +37,8 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
   const [status, setStatus] = useState(null); // { configured, provider, keyHint, providers }
   const [keyDraft, setKeyDraft] = useState("");
   const [providerDraft, setProviderDraft] = useState("");
+  const [baseUrlDraft, setBaseUrlDraft] = useState("");
+  const [tested, setTested] = useState(null); // { baseUrl, models, found } from a successful test
   const [keyBusy, setKeyBusy] = useState(false);
   const [keyError, setKeyError] = useState("");
   const [canRevert, setCanRevert] = useState(false);
@@ -80,20 +82,41 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
     ai.agent.status().then(setStatus).catch(() => {});
   }, [ai, applyModelList]);
 
+  // Test first: one GET to the provider's /models both proves the key works
+  // and reports what it serves. Nothing is saved until the user confirms.
+  const testKey = useCallback(async (providerId, baseUrl) => {
+    setKeyBusy(true);
+    setKeyError("");
+    setTested(null);
+    try {
+      setTested(await ai.agent.test({ provider: providerId === "custom" ? "" : providerId, baseUrl, apiKey: keyDraft }));
+    } catch (e) {
+      setKeyError(e.message);
+    } finally {
+      setKeyBusy(false);
+    }
+  }, [ai, keyDraft]);
+
   const saveKey = useCallback(async (providerId) => {
     setKeyBusy(true);
     setKeyError("");
     try {
-      const r = await ai.agent.setup(providerId, keyDraft);
+      const r = await ai.agent.setup({
+        provider: providerId === "custom" ? "" : providerId,
+        apiKey: keyDraft,
+        baseUrl: tested ? tested.baseUrl : "",
+        models: tested ? tested.models : undefined,
+      });
       setStatus((s) => Object.assign({}, s, { configured: r.configured, provider: r.provider, keyHint: r.keyHint }));
       setKeyDraft("");
+      setTested(null);
       applyModelList(r);
     } catch (e) {
       setKeyError(e.message);
     } finally {
       setKeyBusy(false);
     }
-  }, [ai, keyDraft, applyModelList]);
+  }, [ai, keyDraft, tested, applyModelList]);
 
   useEffect(() => { if (ai) ai.configure({ visionModel: settings.vision }); }, [ai, settings.vision]);
 
@@ -171,14 +194,21 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
     tutor: ["teach me how transformers work", "I want to learn system design basics", "explain TCP handshakes to me step by step"],
   }[mode];
   const visionModels = (models || []).filter((m) => m.vision);
-  const providers = (status && status.providers) || [];
+  const providers = ((status && status.providers) || []).concat([{ id: "custom", label: "Other (OpenAI-compatible)" }]);
   const activeProvider = providerDraft || (status && status.provider) || (providers[0] && providers[0].id) || "";
+  const isCustom = activeProvider === "custom";
   const keysUrl = (providers.find((p) => p.id === activeProvider) || {}).keysUrl || "";
   const savedProviderLabel = (providers.find((p) => p.id === (status && status.provider)) || {}).label || "";
   // switching provider with a key already saved reuses it; the server keeps the
   // old key when apiKey comes back empty
-  const canSaveKey = !keyBusy && !!activeProvider && (!!keyDraft.trim() || !!(status && status.configured));
+  const hasKey = !!keyDraft.trim() || !!(status && status.configured);
+  const canTest = !keyBusy && hasKey && (!isCustom || /^https?:\/\//i.test(baseUrlDraft.trim()));
+  // a custom endpoint must be tested first - that test is where its model list
+  // comes from, since there is no preset to fall back on
+  const canSaveKey = !keyBusy && hasKey && (tested ? true : !isCustom);
   const needsKey = !!status && !status.configured;
+  const testedVision = tested ? tested.models.filter((m) => m.vision).length : 0;
+  const testedReasoning = tested ? tested.models.filter((m) => m.reasoning).length : 0;
 
   return (
     <Sidebar
@@ -220,10 +250,25 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
                 ? "Key saved for " + (savedProviderLabel || status.provider) + " · " + status.keyHint
                 : "Your key is stored on this machine and only ever sent to the provider."}
             </small>
-            <select value={activeProvider} onChange={(e) => setProviderDraft(e.target.value)} disabled={keyBusy || !providers.length}>
+            <select value={activeProvider} onChange={(e) => { setProviderDraft(e.target.value); setTested(null); setKeyError(""); }} disabled={keyBusy || !providers.length}>
               {providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
           </label>
+          {isCustom && (
+            <label className="ai-sidebar__field">
+              <span>Endpoint</span>
+              <small>The OpenAI-compatible base URL, ending before <code>/chat/completions</code>.</small>
+              <input
+                type="text"
+                value={baseUrlDraft}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="https://api.example.com/v1"
+                onChange={(e) => { setBaseUrlDraft(e.target.value); setTested(null); }}
+                disabled={keyBusy}
+              />
+            </label>
+          )}
           <label className="ai-sidebar__field">
             <span>API key</span>
             <small>
@@ -235,21 +280,51 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
               autoComplete="off"
               spellCheck={false}
               placeholder={status && status.configured ? "Saved · paste a new key to replace" : "sk-..."}
-              onChange={(e) => setKeyDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && canSaveKey) { e.preventDefault(); saveKey(activeProvider); } }}
+              onChange={(e) => { setKeyDraft(e.target.value); setTested(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && canTest) { e.preventDefault(); testKey(activeProvider, baseUrlDraft.trim()); } }}
               disabled={keyBusy}
             />
           </label>
-          <button className="ai-sidebar__save" onClick={() => saveKey(activeProvider)} disabled={!canSaveKey}>
-            {keyBusy ? "Saving…" : status && status.configured ? "Update key" : "Save key"}
-          </button>
+          <div className="ai-sidebar__actions">
+            <button className="ai-sidebar__test" onClick={() => testKey(activeProvider, baseUrlDraft.trim())} disabled={!canTest}>
+              {keyBusy && !tested ? "Testing…" : "Test connection"}
+            </button>
+            <button className="ai-sidebar__save" onClick={() => saveKey(activeProvider)} disabled={!canSaveKey}>
+              {status && status.configured && !tested ? "Update key" : "Save"}
+            </button>
+          </div>
           {keyError && <p className="ai-sidebar__hint ai-sidebar__hint--error">{keyError}</p>}
+          {tested && (
+            <div className="ai-sidebar__tested">
+              <p className="ai-sidebar__tested-head">
+                Key works · {tested.models.length} usable model{tested.models.length === 1 ? "" : "s"}
+                {tested.found > tested.models.length ? " (" + (tested.found - tested.models.length) + " non-chat hidden)" : ""}
+              </p>
+              <ul>
+                {tested.models.slice(0, 12).map((m) => (
+                  <li key={m.id}>
+                    <code>{m.id}</code>
+                    {m.vision && <span className="ai-sidebar__tag">vision</span>}
+                    {m.reasoning && <span className="ai-sidebar__tag">reasoning</span>}
+                  </li>
+                ))}
+                {tested.models.length > 12 && <li className="ai-sidebar__tested-more">+{tested.models.length - 12} more</li>}
+              </ul>
+              <p className="ai-sidebar__hint">
+                {testedVision === 0
+                  ? "No vision model here, so Refine and the capture tool will be unavailable."
+                  : testedVision + " can see images. "}
+                {testedReasoning > 0 && testedReasoning + " look like reasoning models and get a 32k output budget."}
+                {" Save to use this list."}
+              </p>
+            </div>
+          )}
           <hr className="ai-sidebar__rule" />
           <label className="ai-sidebar__field">
             <span>Chat model</span>
             <small>Runs the agent loop and edits the canvas.</small>
             <select value={settings.chat} onChange={(e) => update({ chat: e.target.value })} disabled={!!busy || !models}>
-              {(models || []).map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+              {(models || []).map((m) => <option key={m.id} value={m.id}>{m.id}{m.reasoning ? " · reasoning" : ""}</option>)}
             </select>
           </label>
           <label className="ai-sidebar__field">
