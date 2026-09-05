@@ -1,0 +1,394 @@
+/* The panel is an Excalidraw <Sidebar>: island, header, dock/close buttons,
+   --ui-font and .theme--dark all come from Excalidraw. Only the chat body is ours. */
+
+.ai-sidebar {
+  font-size: 0.875rem;
+}
+
+.ai-sidebar__title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.2;
+}
+.ai-sidebar__subtitle {
+  font-weight: 400;
+  font-size: 0.75rem;
+  color: var(--color-gray-60);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.theme--dark .ai-sidebar__subtitle {
+  color: var(--color-gray-40);
+}
+
+/* header buttons: same recipe as Excalidraw's own .sidebar__header__buttons */
+.ai-sidebar__tools {
+  display: flex;
+  margin-left: auto;
+}
+.ai-sidebar__iconbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--lg-button-size);
+  height: var(--lg-button-size);
+  border: 0;
+  border-radius: var(--border-radius-lg);
+  background: transparent;
+  color: var(--color-on-surface);
+  cursor: pointer;
+}
+.ai-sidebar__iconbtn svg {
+  width: var(--lg-icon-size);
+  height: var(--lg-icon-size);
+}
+.ai-sidebar__iconbtn:hover:not(:disabled) {
+  background: var(--button-hover-bg, var(--island-bg-color));
+}
+.ai-sidebar__iconbtn:disabled {
+  color: var(--color-disabled);
+  cursor: default;
+}
+.ai-sidebar__iconbtn:focus-visible {
+  outline: 2px solid var(--focus-highlight-color);
+}
+
+.ai-sidebar__log {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.ai-sidebar__log::-webkit-scrollbar {
+  width: 6px;
+}
+.ai-sidebar__log::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+
+.ai-sidebar__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+  margin: auto 0;
+  padding: 0.5rem 0.25rem;
+  color: var(--color-gray-60);
+  font-size: 0.8125rem;
+}
+.theme--dark .ai-sidebar__empty {
+  color: var(--color-gray-40);
+}
+.ai-sidebar__empty p {
+  margin: 0 0 0.5rem;
+  line-height: 1.5;
+}
+.ai-sidebar__empty-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--border-radius-lg);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  margin-bottom: 0.25rem;
+}
+.ai-sidebar__empty-icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.ai-sidebar__suggest {
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  color: var(--color-on-surface);
+  background: var(--color-surface-low);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-lg);
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+.ai-sidebar__suggest:hover {
+  border-color: var(--color-primary);
+  background: var(--color-surface-high);
+}
+
+.ai-sidebar__msg {
+  max-width: 90%;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--border-radius-lg);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ai-sidebar__msg--user {
+  align-self: flex-end;
+  background: var(--color-primary);
+  color: var(--color-icon-white);
+  border-bottom-right-radius: var(--border-radius-md);
+}
+.ai-sidebar__msg--assistant {
+  align-self: flex-start;
+  background: var(--color-surface-low);
+  border-bottom-left-radius: var(--border-radius-md);
+}
+.ai-sidebar__msg--note {
+  align-self: center;
+  font-size: 0.75rem;
+  color: var(--color-gray-60);
+  padding: 0.1rem 0.5rem;
+}
+.ai-sidebar__msg--error {
+  align-self: flex-start;
+  background: var(--color-danger-background);
+  color: var(--color-danger-color);
+  font-size: 0.8125rem;
+}
+
+.ai-sidebar__working {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  align-self: flex-start;
+  color: var(--color-gray-60);
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.125rem;
+}
+.ai-sidebar__dots {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: ai-pulse 1s ease-in-out infinite;
+}
+@keyframes ai-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+.ai-sidebar__stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--color-on-surface);
+  background: var(--color-surface-low);
+  border: 1px solid var(--default-border-color);
+  border-radius: var(--border-radius-lg);
+  padding: 0.15rem 0.5rem 0.15rem 0.35rem;
+  cursor: pointer;
+}
+.ai-sidebar__stop svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+.ai-sidebar__stop:hover {
+  background: var(--button-hover-bg);
+}
+
+.ai-sidebar__foot {
+  border-top: 1px solid var(--sidebar-border-color);
+  padding: 0.625rem 0.75rem 0.75rem;
+}
+.ai-sidebar__selection {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.5rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--color-surface-primary-container);
+  color: var(--color-on-primary-container);
+  font-size: 0.75rem;
+}
+.ai-sidebar__selection::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+}
+.ai-sidebar__row {
+  display: flex;
+  gap: 0.375rem;
+  align-items: flex-end;
+}
+/* .excalidraw textarea:not(.excalidraw-wysiwyg) sets white-space: nowrap;
+   the selector needs to out-rank it */
+.excalidraw textarea.ai-sidebar__input {
+  flex: 1;
+  resize: none;
+  font: inherit;
+  color: var(--color-on-surface);
+  background: var(--input-bg-color);
+  border: 1px solid var(--input-border-color);
+  border-radius: var(--border-radius-lg);
+  padding: 0.5rem 0.625rem;
+  line-height: 1.4;
+  white-space: pre-wrap; /* the sidebar header sets nowrap and it inherits */
+  overflow-wrap: anywhere;
+  min-height: 2.25rem;
+  max-height: 9rem;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+.ai-sidebar__input::placeholder {
+  color: var(--color-gray-50);
+}
+.ai-sidebar__input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+.ai-sidebar__send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--lg-button-size);
+  height: var(--lg-button-size);
+  border: none;
+  border-radius: var(--border-radius-lg);
+  background: var(--color-primary);
+  color: var(--color-icon-white);
+  cursor: pointer;
+}
+.ai-sidebar__send svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+.ai-sidebar__send:hover:not(:disabled) {
+  background: var(--color-primary-darker);
+}
+.ai-sidebar__send:disabled {
+  background: var(--color-disabled);
+  cursor: default;
+}
+
+/* settings view */
+.ai-sidebar__settings {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem 0.75rem;
+  overflow-y: auto;
+}
+.ai-sidebar__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.ai-sidebar__field > span {
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+.ai-sidebar__field > small {
+  color: var(--color-gray-60);
+  font-size: 0.75rem;
+  margin-bottom: 0.125rem;
+}
+.theme--dark .ai-sidebar__field > small,
+.theme--dark .ai-sidebar__hint {
+  color: var(--color-gray-40);
+}
+.ai-sidebar__field select {
+  font: inherit;
+  color: var(--color-on-surface);
+  background: var(--input-bg-color);
+  border: 1px solid var(--input-border-color);
+  border-radius: var(--border-radius-lg);
+  padding: 0.45rem 0.5rem;
+  cursor: pointer;
+}
+.ai-sidebar__field select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.ai-sidebar__field select option {
+  background: var(--island-bg-color);
+  color: var(--color-on-surface);
+}
+.ai-sidebar__hint {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-gray-60);
+}
+.ai-sidebar__hint code {
+  background: var(--color-surface-low);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+}
+.ai-sidebar__hint--error {
+  color: var(--color-danger-color);
+  background: var(--color-danger-background);
+  padding: 0.5rem 0.625rem;
+  border-radius: var(--border-radius-lg);
+}
+
+/* mode tabs, above the input */
+.ai-sidebar__modes {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+.ai-sidebar__mode {
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--color-gray-60);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  cursor: pointer;
+}
+.theme--dark .ai-sidebar__mode {
+  color: var(--color-gray-40);
+}
+.ai-sidebar__mode:hover:not(:disabled) {
+  background: var(--color-surface-low);
+}
+.ai-sidebar__mode--on {
+  color: var(--color-on-primary-container);
+  background: var(--color-surface-primary-container);
+  border-color: var(--color-surface-primary-container);
+}
+.ai-sidebar__modes .ai-sidebar__selection {
+  margin: 0 0 0 auto;
+}
+
+/* light markdown in assistant replies */
+.ai-sidebar__msg--assistant {
+  white-space: normal;
+}
+.ai-md__h {
+  font-weight: 700;
+  margin-top: 0.5rem;
+}
+.ai-md__li {
+  position: relative;
+  padding-left: 1rem;
+}
+.ai-md__li::before {
+  content: "\2022";
+  position: absolute;
+  left: 0.25rem;
+}
+.ai-md__li--n::before {
+  content: "";
+}
+.ai-sidebar__msg--assistant code {
+  background: var(--color-surface-high);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.8125rem;
+}

@@ -1,0 +1,279 @@
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Sidebar } from "@excalidraw/excalidraw";
+import { AGENT_MODES } from "../../agent-contract.mjs";
+import "./AgentPanel.css";
+
+export const SIDEBAR_NAME = "ai";
+const CHAT_KEY = "excalidraw-ai-chat";
+const SETTINGS_KEY = "excalidraw-ai-settings"; // { chat, vision, docked, mode }
+
+function stored(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch (e) { return fallback; }
+}
+function store(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+}
+
+const ICON = {
+  gear: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>,
+  back: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
+  trash: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>,
+  undo: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 14l-4-4 4-4"/><path d="M5 10h11a4 4 0 0 1 0 8h-1"/></svg>,
+  send: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>,
+  stop: <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>,
+  spark: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 17l.7 2.3L22 20l-2.3.7L19 23l-.7-2.3L16 20l2.3-.7z"/></svg>,
+};
+
+// Renders as an Excalidraw <Sidebar>, so it IS Excalidraw UI: same island,
+// header, dock/close buttons, fonts, and dark mode. No theme code here.
+export default function AgentPanel({ excalidrawAPI, ai }) {
+  const [settings, setSettings] = useState(() => Object.assign({ chat: "", vision: "", docked: true, mode: "assistant" }, stored(SETTINGS_KEY, {})));
+  const [view, setView] = useState("chat"); // "chat" | "settings"
+  const [chat, setChat] = useState(() => stored(CHAT_KEY, []));
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false); // false | step label
+  const [models, setModels] = useState(null); // null = loading, [] = failed
+  const [loadError, setLoadError] = useState("");
+  const [canRevert, setCanRevert] = useState(false);
+  const [selectedCount, setSelectedCount] = useState(0);
+  const logRef = useRef(null);
+  const rootRef = useRef(null);
+  const abortRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // grow the box with the text (up to the CSS max-height), shrink when cleared
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, [input, view]);
+
+  const update = useCallback((patch) => {
+    setSettings((s) => { const next = Object.assign({}, s, patch); store(SETTINGS_KEY, next); return next; });
+  }, []);
+
+  useEffect(() => {
+    if (!ai) return;
+    ai.agent.models().then((r) => {
+      setModels(r.models);
+      setLoadError("");
+      const has = (id) => r.models.some((m) => m.id === id);
+      const vision = r.models.filter((m) => m.vision);
+      update({
+        chat: has(settings.chat) ? settings.chat : r.default,
+        vision: has(settings.vision) ? settings.vision : (r.visionDefault || (vision[0] && vision[0].id) || ""),
+      });
+    }).catch((e) => { setModels([]); setLoadError(e.message); });
+  }, [ai]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { if (ai) ai.configure({ visionModel: settings.vision }); }, [ai, settings.vision]);
+
+  // errors are for this session only; a persisted one would outlive its cause
+  useEffect(() => { store(CHAT_KEY, chat.filter((m) => m.role !== "error").slice(-200)); }, [chat]);
+
+  useEffect(() => {
+    if (!excalidrawAPI) return;
+    excalidrawAPI.toggleSidebar({ name: SIDEBAR_NAME, force: true });
+  }, [excalidrawAPI]);
+
+  // Excalidraw binds wheel natively on its container and treats a textarea
+  // target as canvas input; a native listener on our root stops that.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const stop = (e) => e.stopPropagation();
+    el.addEventListener("wheel", stop, { passive: false });
+    return () => el.removeEventListener("wheel", stop);
+  });
+
+  useEffect(() => {
+    if (!excalidrawAPI) return;
+    return excalidrawAPI.onChange((elements, appState) => {
+      const ids = appState.selectedElementIds || {};
+      const live = new Set(elements.filter((e) => !e.isDeleted).map((e) => e.id));
+      setSelectedCount(Object.keys(ids).filter((id) => ids[id] && live.has(id)).length);
+    });
+  }, [excalidrawAPI]);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [chat, busy, view]);
+
+  const send = useCallback(async () => {
+    const text = input.trim();
+    if (!text || !ai || busy) return;
+    setChat((c) => [...c, { role: "user", text }]);
+    setInput("");
+    setBusy("thinking");
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      const model = (models || []).find((m) => m.id === settings.chat);
+      const r = await ai.agent.send(text, { model, mode: settings.mode, signal: ac.signal, onStep: setBusy });
+      setChat((c) => [...c, { role: "assistant", text: r.reply || "(no reply)" }]);
+    } catch (e) {
+      const stopped = e && e.name === "AbortError";
+      setChat((c) => [...c, { role: stopped ? "note" : "error", text: stopped ? "Stopped." : e && e.message ? e.message : String(e) }]);
+    } finally {
+      abortRef.current = null;
+      setBusy(false);
+      setCanRevert(true);
+    }
+  }, [input, ai, busy, models, settings.chat, settings.mode]);
+
+  const stop = useCallback(() => abortRef.current && abortRef.current.abort(), []);
+
+  const revert = useCallback(() => {
+    if (ai && ai.agent.revert()) setChat((c) => [...c, { role: "note", text: "Reverted the last turn." }]);
+    setCanRevert(false);
+  }, [ai]);
+
+  const reset = useCallback(() => {
+    if (ai) ai.agent.reset();
+    setChat([]);
+    setCanRevert(false);
+  }, [ai]);
+
+  const chatModel = (models || []).find((m) => m.id === settings.chat);
+  const mode = AGENT_MODES[settings.mode] ? settings.mode : "assistant";
+  const suggestions = {
+    assistant: ["add two nodes labeled Input and Output", "connect these with an arrow", "rename the box labeled Start to Begin", "draw a CI pipeline flowchart", "does anything overlap?"],
+    guide: ["I want to build a habit-tracking app solo in 3 months", "plan a migration from a monolith to services", "design the data model for a booking system"],
+    tutor: ["teach me how transformers work", "I want to learn system design basics", "explain TCP handshakes to me step by step"],
+  }[mode];
+  const visionModels = (models || []).filter((m) => m.vision);
+
+  return (
+    <Sidebar
+      name={SIDEBAR_NAME}
+      className="ai-sidebar"
+      docked={settings.docked}
+      onDock={(docked) => update({ docked })}
+      ref={rootRef}
+    >
+      <Sidebar.Header>
+        {view === "settings" ? (
+          <button className="ai-sidebar__iconbtn" onClick={() => setView("chat")} title="Back to chat" aria-label="Back to chat">{ICON.back}</button>
+        ) : null}
+        <div className="ai-sidebar__title">
+          {view === "settings" ? "AI settings" : "AI agent"}
+          {view === "chat" && (
+            <span className="ai-sidebar__subtitle" title={loadError || settings.chat}>
+              {AGENT_MODES[mode].label} · {loadError ? "models unavailable" : settings.chat || (models === null ? "loading models" : "no models")}
+            </span>
+          )}
+        </div>
+        {view === "chat" && (
+          <div className="ai-sidebar__tools">
+            {canRevert && !busy && (
+              <button className="ai-sidebar__iconbtn" onClick={revert} title="Revert the last turn" aria-label="Revert the last turn">{ICON.undo}</button>
+            )}
+            <button className="ai-sidebar__iconbtn" onClick={reset} disabled={!!busy || !chat.length} title="Clear conversation" aria-label="Clear conversation">{ICON.trash}</button>
+            <button className="ai-sidebar__iconbtn" onClick={() => setView("settings")} title="Settings" aria-label="Settings">{ICON.gear}</button>
+          </div>
+        )}
+      </Sidebar.Header>
+
+      {view === "settings" ? (
+        <div className="ai-sidebar__settings">
+          <label className="ai-sidebar__field">
+            <span>Chat model</span>
+            <small>Runs the agent loop and edits the canvas.</small>
+            <select value={settings.chat} onChange={(e) => update({ chat: e.target.value })} disabled={!!busy || !models}>
+              {(models || []).map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+            </select>
+          </label>
+          <label className="ai-sidebar__field">
+            <span>Vision model</span>
+            <small>Reads screenshots for Refine and for the agent's capture tool.</small>
+            <select value={settings.vision} onChange={(e) => update({ vision: e.target.value })} disabled={!!busy || !models}>
+              {visionModels.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+            </select>
+          </label>
+          {chatModel && chatModel.vision && (
+            <p className="ai-sidebar__hint">The chat model can see: captures go to it directly instead of through the vision model.</p>
+          )}
+          {loadError && <p className="ai-sidebar__hint ai-sidebar__hint--error">{loadError}</p>}
+          <p className="ai-sidebar__hint">
+            The list comes from <code>AI_MODELS</code> in <code>bridge/.env</code>; flag vision-capable entries with <code>:vision</code>.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="ai-sidebar__log" ref={logRef}>
+            {chat.length === 0 && (
+              <div className="ai-sidebar__empty">
+                <div className="ai-sidebar__empty-icon">{ICON.spark}</div>
+                <p>{AGENT_MODES[mode].hint} Select elements first to talk about <em>these</em>.</p>
+                {suggestions.map((s) => (
+                  <button key={s} className="ai-sidebar__suggest" onClick={() => setInput(s)}>{s}</button>
+                ))}
+              </div>
+            )}
+            {chat.map((m, i) => (
+              <div key={i} className={"ai-sidebar__msg ai-sidebar__msg--" + m.role}>{m.role === "assistant" ? renderLite(m.text) : m.text}</div>
+            ))}
+            {busy && (
+              <div className="ai-sidebar__working">
+                <span className="ai-sidebar__dots" /> {busy}
+                <button className="ai-sidebar__stop" onClick={stop}>{ICON.stop} Stop</button>
+              </div>
+            )}
+          </div>
+
+          <div className="ai-sidebar__foot">
+            <div className="ai-sidebar__modes" role="tablist" aria-label="mode">
+              {Object.keys(AGENT_MODES).map((k) => (
+                <button key={k} role="tab" aria-selected={k === mode} className={"ai-sidebar__mode" + (k === mode ? " ai-sidebar__mode--on" : "")} onClick={() => update({ mode: k })} disabled={!!busy} title={AGENT_MODES[k].hint}>
+                  {AGENT_MODES[k].label}
+                </button>
+              ))}
+              {selectedCount > 0 && <span className="ai-sidebar__selection">{selectedCount} selected</span>}
+            </div>
+            <div className="ai-sidebar__row">
+              <textarea
+                ref={inputRef}
+                className="ai-sidebar__input"
+                rows={1}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+                }}
+                placeholder="Ask the canvas..."
+              />
+              <button className="ai-sidebar__send" onClick={send} disabled={!!busy || !input.trim()} title="Send (Enter)" aria-label="Send">{ICON.send}</button>
+            </div>
+          </div>
+        </>
+      )}
+    </Sidebar>
+  );
+}
+
+// ponytail: bold, inline code, headings and bullets are enough for the guide
+// and tutor replies; a markdown library is the upgrade if tables ever matter
+function renderLite(text) {
+  return text.split("\n").map((line, i) => {
+    let cls = "";
+    let body = line;
+    if (/^#{1,3}\s/.test(line)) { cls = "ai-md__h"; body = line.replace(/^#{1,3}\s/, ""); }
+    else if (/^\s*[-*]\s/.test(line)) { cls = "ai-md__li"; body = line.replace(/^\s*[-*]\s/, ""); }
+    else if (/^\s*\d+[.)]\s/.test(line)) { cls = "ai-md__li ai-md__li--n"; }
+    const parts = body.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((p, j) => {
+      if (p.startsWith("**")) return <strong key={j}>{p.slice(2, -2)}</strong>;
+      if (p.startsWith("`")) return <code key={j}>{p.slice(1, -1)}</code>;
+      return p;
+    });
+    return <div key={i} className={cls || undefined}>{body ? parts : "\u00a0"}</div>;
+  });
+}
+
+export function AgentTrigger() {
+  return (
+    <Sidebar.Trigger name={SIDEBAR_NAME} icon={ICON.spark} title="AI agent">
+      <span className="sidebar-trigger__label">AI</span>
+    </Sidebar.Trigger>
+  );
+}
