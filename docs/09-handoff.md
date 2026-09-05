@@ -71,6 +71,14 @@ tarball contains `.env.example` but **not** `.env`, `config.json`, the tests or
 any log. `prepack` builds the host, so publishing without a fresh `dist` is not
 possible.
 
+**With no key there are no models.** `/api/ai/models` used to serve the
+server's built-in fallbacks (`deepseek-v4-flash`, `gpt-4o`) unconditionally, so
+a fresh install advertised a configuration nobody had chosen. It now returns an
+empty list until a key exists; the panel replaces the pickers with one line and
+the subtitle reads "no API key". Found by running the packed tarball, not by
+any test — the dev machine always had a key, which is exactly the class of bug
+a first-run path hides.
+
 > In development keep using Vite on :5173. The bridge only serves a build if
 > one exists, and a stale `dist` served from :8787 is a confusing way to test.
 
@@ -241,6 +249,13 @@ tutor conversation on HTTPS behaved as specified, including the
   and `/describe` then returned the no-vision-model message instead of a
   phantom id; the saved provider, key, baseUrl and model list survived a
   restart ("loaded saved settings: custom …1234, 2 models").
+- The published package, end to end: a fresh `git clone` -> `cd bridge` ->
+  `npm pack` installs the host deps, builds, and produces a 2.7 MB / 142-file
+  tarball carrying `.env.example` but no `.env`, `config.json`, tests or logs.
+  Extracted and run with no `node_modules` and no key, it serves the app and
+  its assets, reports `configured: false`, answers 503 on `/chat`, blocks
+  `/../.env` with 400, and shows the first-run banner and key form in Chrome.
+  A busy port prints a named error and the `PORT=` override, not a stack.
 - The settings screen, clicked through in the user's own Chrome against the
   real DeepSeek endpoint: the form renders inside the sidebar in Excalidraw's
   own styling, Test connection returned "Key works · 3 usable models" with
@@ -303,6 +318,9 @@ provider picks up that preset's verified flags.
   real turn and let the observed value overwrite the guess — `callChat`
   currently returns only `message`, so that needs plumbing. Until then a wrong
   guess costs a bad token budget, which surfaces as a 400 or a truncated reply.
+- Publishing to npm. The name `excalidraw-ai` has not been checked for
+  availability and nothing has been pushed to the registry - that is a one-way
+  action and needs the user's call.
 - Saving a discovered list from a **real** provider. The test path was clicked
   through live (below), but nobody has pressed Save on it, so `config.json`
   has only ever been written by the mock-provider runs.
