@@ -4,7 +4,6 @@ import { AGENT_MODES } from "../../agent-contract.mjs";
 import "./AgentPanel.css";
 
 export const SIDEBAR_NAME = "ai";
-const CHAT_KEY = "excalidraw-ai-chat";
 const SETTINGS_KEY = "excalidraw-ai-settings"; // { chat, vision, docked, mode }
 
 function stored(key, fallback) {
@@ -16,6 +15,8 @@ function store(key, value) {
 
 const ICON = {
   gear: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>,
+  history: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>,
+  plus: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"/></svg>,
   back: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>,
   trash: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>,
   undo: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 14l-4-4 4-4"/><path d="M5 10h11a4 4 0 0 1 0 8h-1"/></svg>,
@@ -26,10 +27,9 @@ const ICON = {
 
 // Renders as an Excalidraw <Sidebar>, so it IS Excalidraw UI: same island,
 // header, dock/close buttons, fonts, and dark mode. No theme code here.
-export default function AgentPanel({ excalidrawAPI, ai }) {
+export default function AgentPanel({ excalidrawAPI, ai, chat, setChat, chats, activeId, onOpenChat, onNewChat, onDeleteChat }) {
   const [settings, setSettings] = useState(() => Object.assign({ chat: "", vision: "", docked: true, mode: "assistant" }, stored(SETTINGS_KEY, {})));
-  const [view, setView] = useState("chat"); // "chat" | "settings"
-  const [chat, setChat] = useState(() => stored(CHAT_KEY, []));
+  const [view, setView] = useState("chat"); // "chat" | "settings" | "history"
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false); // false | step label
   const [models, setModels] = useState(null); // null = loading, [] = failed
@@ -119,9 +119,6 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
   }, [ai, keyDraft, tested, applyModelList]);
 
   useEffect(() => { if (ai) ai.configure({ visionModel: settings.vision }); }, [ai, settings.vision]);
-
-  // errors are for this session only; a persisted one would outlive its cause
-  useEffect(() => { store(CHAT_KEY, chat.filter((m) => m.role !== "error").slice(-200)); }, [chat]);
 
   useEffect(() => {
     if (!excalidrawAPI) return;
@@ -227,19 +224,25 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
       ref={rootRef}
     >
       <Sidebar.Header>
-        {view === "settings" ? (
+        {view !== "chat" ? (
           <button className="ai-sidebar__iconbtn" onClick={() => setView("chat")} title="Back to chat" aria-label="Back to chat">{ICON.back}</button>
         ) : null}
         <div className="ai-sidebar__title">
-          {view === "settings" ? "AI settings" : "AI agent"}
+          {view === "settings" ? "AI settings" : view === "history" ? "Chats" : "AI agent"}
           {view === "chat" && (
             <span className="ai-sidebar__subtitle" title={loadError || settings.chat}>
               {AGENT_MODES[mode].label} · {loadError ? "models unavailable" : needsKey ? "no API key" : settings.chat || (models === null ? "loading models" : "no models")}
             </span>
           )}
         </div>
+        {view === "history" && (
+          <div className="ai-sidebar__tools">
+            <button className="ai-sidebar__iconbtn" onClick={() => { onNewChat(); setView("chat"); }} title="New chat" aria-label="New chat">{ICON.plus}</button>
+          </div>
+        )}
         {view === "chat" && (
           <div className="ai-sidebar__tools">
+            <button className="ai-sidebar__iconbtn" onClick={() => setView("history")} title="Chats" aria-label="Chats">{ICON.history}</button>
             {canRevert && !busy && (
               <button className="ai-sidebar__iconbtn" onClick={revert} title="Revert the last turn" aria-label="Revert the last turn">{ICON.undo}</button>
             )}
@@ -249,7 +252,21 @@ export default function AgentPanel({ excalidrawAPI, ai }) {
         )}
       </Sidebar.Header>
 
-      {view === "settings" ? (
+      {view === "history" ? (
+        <div className="ai-sidebar__chats">
+          <p className="ai-sidebar__hint">Each chat owns its own canvas. Opening one brings its diagram back.</p>
+          {chats.map((c) => (
+            <div key={c.id} className={"ai-sidebar__chatrow" + (c.id === activeId ? " ai-sidebar__chatrow--on" : "")}>
+              <button className="ai-sidebar__chatopen" onClick={() => { onOpenChat(c.id); setView("chat"); }} disabled={!!busy}>
+                <span className="ai-sidebar__chatname">{c.title}</span>
+                <span className="ai-sidebar__chatdate">{new Date(c.updatedAt).toLocaleDateString()}</span>
+              </button>
+              <button className="ai-sidebar__iconbtn" onClick={() => onDeleteChat(c.id)} disabled={!!busy} title={"Delete " + c.title} aria-label={"Delete " + c.title}>{ICON.trash}</button>
+            </div>
+          ))}
+          <button className="ai-sidebar__suggest" onClick={() => { onNewChat(); setView("chat"); }} disabled={!!busy}>+ New chat</button>
+        </div>
+      ) : view === "settings" ? (
         <div className="ai-sidebar__settings">
           <label className="ai-sidebar__field">
             <span>Provider</span>

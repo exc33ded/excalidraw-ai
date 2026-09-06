@@ -1,4 +1,5 @@
-# upstream reference clones, read-only; see README for how to fetch them
+# upstream reference clones (excalidraw, penecho): local dev references only,
+# never part of the project - docs and package do not depend on them
 /excalidraw/
 /penecho/
 

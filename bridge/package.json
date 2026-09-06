@@ -15,6 +15,7 @@
     "agent-contract.mjs",
     "geometry.mjs",
     "client.mjs",
+    "store.mjs",
     "host/dist",
     ".env.example",
     "README.md"

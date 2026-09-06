@@ -4,6 +4,7 @@ import { callVisionModel, callChat } from "./vision.mjs";
 import { validateSkeleton, DIAGRAM_GENERATION_PROMPT, DESCRIBE_SYSTEM_PROMPT } from "./diagram-contract.mjs";
 import { parseModelList, PROVIDER_PRESETS, maskKey, mergeDiscoveredModels } from "./agent-contract.mjs";
 import { serveStatic, openBrowser, DIST } from "./static.mjs";
+import { listChats, createChat, readChat, writeChat, deleteChat } from "./store.mjs";
 
 try { process.loadEnvFile?.(new URL("./.env", import.meta.url)); } catch (e) {}
 
@@ -106,7 +107,7 @@ function visionModelFor(body) {
 
 const CORS = {
   "Access-Control-Allow-Origin": process.env.ALLOWED_ORIGIN || "*",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "content-type, authorization",
 };
 
@@ -308,6 +309,38 @@ const server = createServer(async function (req, res) {
       return send(res, 500, { error: e && e.message ? e.message : "internal error" });
     }
   }
+  // Chat history. Each chat owns a canvas, so these carry the scene too - the
+  // whole point is that reopening a conversation brings its diagram back.
+  // originOk applies to the reads as well as the writes: under the default `*`
+  // CORS, an unguarded GET would let any page the user has open read their
+  // diagrams and conversations.
+  const chatRoute = req.url.match(/^\/api\/chats(?:\/([^/?]+))?$/);
+  if (chatRoute) {
+    if (!originOk(req)) return send(res, 403, { error: "cross-origin chat access is refused" });
+    const id = chatRoute[1];
+    try {
+      if (req.method === "GET" && !id) return send(res, 200, { chats: listChats() });
+      if (req.method === "POST" && !id) {
+        const body = await readJson(req);
+        return send(res, 200, { meta: createChat(body.title) });
+      }
+      if (req.method === "GET" && id) {
+        const chat = readChat(id);
+        return chat ? send(res, 200, chat) : send(res, 404, { error: "no such chat" });
+      }
+      if (req.method === "PUT" && id) {
+        const meta = writeChat(id, await readJson(req));
+        return meta ? send(res, 200, { meta: meta }) : send(res, 404, { error: "no such chat" });
+      }
+      if (req.method === "DELETE" && id) {
+        deleteChat(id);
+        return send(res, 200, { ok: true });
+      }
+    } catch (e) {
+      return send(res, 400, { error: e && e.message ? e.message : "chat store error" });
+    }
+  }
+
   // anything that is not an API call is the built app, when there is one
   if (req.method === "GET" && req.url.indexOf("/api/") !== 0) return serveStatic(req, res);
   return send(res, 404, { error: "not found" });

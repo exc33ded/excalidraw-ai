@@ -63,32 +63,32 @@ function assignFreshIds(specs) {
   });
 }
 
-const MESSAGES_KEY = "excalidraw-ai-agent-messages";
 // query results accumulate every turn; past this the oldest turns are dropped whole
 const MESSAGES_BUDGET = 120000;
 
-export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", chatEndpoint = "/api/ai/chat", describeEndpoint = "/api/ai/describe", modelsEndpoint = "/api/ai/models", statusEndpoint = "/api/ai/status", configEndpoint = "/api/ai/config", testEndpoint = "/api/ai/test", token = "", appendGap = 80 }) {
+export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", chatEndpoint = "/api/ai/chat", describeEndpoint = "/api/ai/describe", modelsEndpoint = "/api/ai/models", statusEndpoint = "/api/ai/status", configEndpoint = "/api/ai/config", testEndpoint = "/api/ai/test", chatsEndpoint = "/api/chats", onMessages, token = "", appendGap = 80 }) {
   let draft = null; // { sourceIds:Set, draftIds:Set, sourceBbox, mode:"sketch"|"text" }
   const agent = { messages: [], snapshot: null }; // snapshot = scene before the last turn
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = "Bearer " + token;
   const prefs = { visionModel: "" }; // set by the panel's settings view; "" = server default
 
-  // conversation survives a refresh; the system prompt is always rebuilt from
-  // source so a prompt edit reaches returning users
-  try {
-    const saved = JSON.parse(localStorage.getItem(MESSAGES_KEY) || "[]");
-    if (Array.isArray(saved) && saved.length) agent.messages = [{ role: "system", content: systemPromptFor("assistant") }].concat(saved.filter(function (m) { return m.role !== "system"; }));
-  } catch (e) {}
-
+  // The transcript belongs to whichever chat is open, so persisting it is the
+  // host's job now (it knows the chat id); this only hands over the slim copy.
   function saveMessages() {
-    try {
-      // screenshots handed to a vision brain are megabytes of base64; keep a marker only
-      const slim = agent.messages.slice(1).map(function (m) {
-        return Array.isArray(m.content) ? Object.assign({}, m, { content: "[image omitted]" }) : m;
-      });
-      localStorage.setItem(MESSAGES_KEY, JSON.stringify(slim));
-    } catch (e) {}
+    if (!onMessages) return;
+    // screenshots handed to a vision brain are megabytes of base64; keep a marker only
+    onMessages(agent.messages.slice(1).map(function (m) {
+      return Array.isArray(m.content) ? Object.assign({}, m, { content: "[image omitted]" }) : m;
+    }));
+  }
+
+  // swap in a stored conversation. The system prompt is always rebuilt from
+  // source, so a prompt edit reaches returning users.
+  function agentLoad(messages) {
+    const past = Array.isArray(messages) ? messages.filter(function (m) { return m.role !== "system"; }) : [];
+    agent.messages = past.length ? [{ role: "system", content: systemPromptFor("assistant") }].concat(past) : [];
+    agent.snapshot = null; // a snapshot of another chat's canvas must never be revertable here
   }
 
   function sceneElements() {
@@ -528,10 +528,101 @@ export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", 
     return out;
   }
 
+  // connect_layers: the model picks which nodes form which layer, this does all
+  // the geometry. A complete graph is unrepresentable here - only layer i to
+  // layer i+1 exists - which is the point. Asked to wire scattered nodes
+  // "feed-forward", the model reliably talks itself into every-node-to-every-
+  // node-on-its-right, and a system-prompt rule against it loses to a chat
+  // whose own history already did it once.
+  function runConnectLayers(args) {
+    const layers = (args && Array.isArray(args.layers) ? args.layers : [])
+      .filter(function (l) { return Array.isArray(l) && l.length; });
+    if (layers.length < 2) return { error: "layers needs at least two groups of element ids" };
+
+    const ids = layers.flat();
+    const byId = new Map(sceneElements().map(function (e) { return [e.id, e]; }));
+    const missing = ids.filter(function (id) { return !byId.has(id); });
+    if (missing.length) return { error: "no such elements: " + missing.join(", ") };
+
+    // A hand-drawn blob becomes an ellipse over its own bounding box: the same
+    // rough look, but a bindable container. freedraw cannot hold an arrow
+    // binding, so lines drawn to a blob are loose geometry that stays put when
+    // the blob is dragged. Keeping the element's id means the layers passed in
+    // still address it. Long thin strokes are skipped - unlikely to be nodes.
+    const blobs = ids.map(function (id) { return byId.get(id); }).filter(function (e) {
+      const w = e.width || 0, h = e.height || 0;
+      return e.type === "freedraw" && w > 0 && h > 0 && w / h >= 0.5 && w / h <= 2;
+    });
+    if (blobs.length) {
+      const shaped = convertToExcalidrawElements(blobs.map(function (e) {
+        return {
+          type: "ellipse", id: e.id, x: e.x, y: e.y, width: e.width, height: e.height,
+          strokeColor: e.strokeColor, backgroundColor: e.backgroundColor,
+          strokeWidth: e.strokeWidth, fillStyle: e.fillStyle, roughness: e.roughness,
+        };
+      }), { regenerateIds: false });
+      const swap = new Map(shaped.map(function (e) { return [e.id, e]; }));
+      excalidrawAPI.updateScene({
+        elements: sceneElements().map(function (e) { return swap.get(e.id) || e; }),
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      });
+      swap.forEach(function (e, id) { byId.set(id, e); }); // layout below reads the ellipses
+    }
+
+    const nodes = ids.map(function (id) { return byId.get(id); });
+    const box = bboxOf(nodes);
+    if (!box) return { error: "those elements have no usable coordinates" };
+    const wide = Math.max.apply(null, nodes.map(function (e) { return e.width || 0; }));
+    const tall = Math.max.apply(null, nodes.map(function (e) { return e.height || 0; }));
+    // gaps scaled to the nodes themselves, so hand-drawn blobs and 140px boxes
+    // both come out readable instead of squeezed into the old bounding box
+    const colGap = wide * 2.5, rowGap = tall * 1.6;
+    const cy = box.y + box.height / 2;
+
+    const changes = [];
+    layers.forEach(function (layer, i) {
+      const x = box.x + i * colGap;
+      const top = cy - ((layer.length - 1) * rowGap) / 2;
+      layer.forEach(function (id, j) {
+        const e = byId.get(id);
+        changes.push({
+          id: id,
+          x: Math.round(x + (wide - (e.width || 0)) / 2),
+          y: Math.round(top + j * rowGap - (e.height || 0) / 2),
+        });
+      });
+    });
+    runUpdate({ changes: changes }); // arrange first: arrow geometry reads the new positions
+
+    // always an arrow, headless when asked for "plain lines": only arrows bind
+    // (isBindingElement narrows to ExcalidrawArrowElement), and a line element
+    // would look right but come loose the moment a node is dragged
+    const heads = !(args && args.arrowheads === false);
+    const specs = [];
+    for (let i = 0; i + 1 < layers.length; i++) {
+      layers[i].forEach(function (from) {
+        layers[i + 1].forEach(function (to) {
+          specs.push({
+            type: "arrow", start: from, end: to,
+            startArrowhead: null, endArrowhead: heads ? "arrow" : null,
+          });
+        });
+      });
+    }
+    const made = runCreate({ elements: specs });
+    return {
+      refined: blobs.length,
+      arranged: changes.length,
+      connected: (made.created || []).length,
+      layers: layers.map(function (l) { return l.length; }),
+    };
+  }
+
   function executeTool(name, args, turn) {
     if (name === "query_elements") return runQuery(args);
     if (name === "create_elements") return runCreate(args);
     if (name === "update_elements") return runUpdate(args);
+    if (name === "connect_layers") return runConnectLayers(args);
     if (name === "delete_elements") return runDelete(args);
     if (name === "create_diagram") return runCreateDiagram(args); // async
     if (name === "set_view") return runSetView(args);
@@ -653,6 +744,13 @@ export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", 
     return data; // same shape as status, plus the new model list
   }
 
+  async function chatsFetch(path, opts) {
+    const res = await fetch(chatsEndpoint + path, Object.assign({ headers: headers }, opts));
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(data.error || ("chat store failed (" + res.status + ")"));
+    return data;
+  }
+
   function configure(opts) {
     if (opts && typeof opts.visionModel === "string") prefs.visionModel = opts.visionModel;
   }
@@ -665,6 +763,13 @@ export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", 
     generateFromText: generateFromText,
     accept: accept,
     reject: reject,
-    agent: { send: agentSend, reset: agentReset, revert: agentRevert, models: agentModels, status: agentStatus, setup: agentSetup, test: agentTest },
+    agent: { send: agentSend, reset: agentReset, revert: agentRevert, load: agentLoad, models: agentModels, status: agentStatus, setup: agentSetup, test: agentTest },
+    chats: {
+      list: function () { return chatsFetch("", {}).then(function (r) { return r.chats; }); },
+      create: function (title) { return chatsFetch("", { method: "POST", body: JSON.stringify({ title: title }) }).then(function (r) { return r.meta; }); },
+      read: function (id) { return chatsFetch("/" + id, {}); },
+      save: function (id, patch) { return chatsFetch("/" + id, { method: "PUT", body: JSON.stringify(patch) }); },
+      remove: function (id) { return chatsFetch("/" + id, { method: "DELETE" }); },
+    },
   };
 }
