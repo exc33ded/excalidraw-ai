@@ -38,7 +38,7 @@ run `npm run build` in `bridge/host`.
     cli.mjs                 `npx excalidraw-ai` entry (server + open a browser)
     server.mjs              HTTP server: /api/ai/* proxy, /api/chats store, static host
     client.mjs              wireExcalidrawAI(): one-shot paths + the agent loop + all tools
-    agent-contract.mjs      persona, modes, the seven tool schemas, model-list parsing
+    agent-contract.mjs      persona, modes, the eight tool schemas, model-list parsing
     geometry.mjs            pure canvas helpers (bbox, labels, arrows, TOON rows)
     vision.mjs              OpenAI-compatible vision/chat calls
     diagram-contract.mjs    the diagram output contract + validateSkeleton()

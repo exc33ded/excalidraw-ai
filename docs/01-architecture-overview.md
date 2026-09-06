@@ -63,7 +63,7 @@ and 09).
 | --- | --- |
 | `server.mjs` | HTTP server: `/api/ai/*` proxy, `/api/chats` store routes, static host, BYOK config |
 | `client.mjs` | `wireExcalidrawAI()`: the one-shot paths, the agent loop, all tool implementations |
-| `agent-contract.mjs` | System prompt, the seven tool schemas, modes, model-list parsing (no `@excalidraw` import) |
+| `agent-contract.mjs` | System prompt, the eight tool schemas, modes, model-list parsing (no `@excalidraw` import) |
 | `geometry.mjs` | Pure canvas helpers: bbox, relative->absolute mapping, labels, arrow geometry |
 | `vision.mjs` | OpenAI-compatible vision/chat calls (one-shot diagram, describe, agent chat) |
 | `diagram-contract.mjs` | The diagram output schema, prompts, and `validateSkeleton()` |

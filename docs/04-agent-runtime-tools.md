@@ -18,6 +18,10 @@ hammers on:
   pipeline, network, ER) must use `create_diagram` with mermaid - a layout
   engine places everything, so boxes never overlap and no connection is
   missed. Never hand-place a multi-node diagram.
+- **layers, not hand-placed wiring**: connecting shapes that are already on
+  the canvas into a network (neural network, feed-forward, pipeline) must use
+  `connect_layers` with the nodes grouped into layers left to right. The tool
+  cannot express a connection that skips a layer, which is the point.
 - **A shape's text IS its label**: set it with `update_elements` on the shape;
   labels are never free-floating elements to create, move, or delete.
 - Coordinates are absolute canvas pixels; new elements go near existing ones
@@ -43,7 +47,7 @@ turn, so switching mid-conversation takes effect immediately:
 
 ## Tools
 
-All seven are implemented with the semantics below (see the schemas in
+All eight are implemented with the semantics below (see the schemas in
 `agent-contract.mjs` for the exact parameters):
 
 | Tool | Purpose | Result shape |
@@ -52,6 +56,7 @@ All seven are implemented with the semantics below (see the schemas in
 | `create_elements` | Add shapes, text, and arrows that bind to element ids. | `{ created: [{ id, type }] }` |
 | `update_elements` | Move/resize/restyle/relabel existing elements by id; only changed fields. | `{ updated: [{ id, ok, error? }] }` |
 | `delete_elements` | Delete by id. | `{ deleted: [id] }` |
+| `connect_layers` | Wire shapes already on the canvas into a layered network: arrange them into evenly spaced columns and connect each layer to the next one only. | `{ refined, arranged, connected, layers: [n] }` or `{ error }` |
 | `create_diagram` | Whole laid-out diagram from a mermaid definition; new block beside existing content. | `{ created: N, bbox }` or `{ error }` (mermaid syntax error returned verbatim so the model can fix it) |
 | `set_view` | Frame ids, the selection, or the whole canvas in the user's viewport. | `{ framed: N }` |
 | `capture` | Render targets to PNG and *look*: how it actually renders, not coordinates. | `{ elements, width, height }` + a description (see below) |
@@ -75,6 +80,16 @@ All seven are implemented with the semantics below (see the schemas in
   creates the bound text element when a container gets text for the first
   time. `delete_elements` takes the bound label with its container and strips
   dead `startBinding`/`endBinding`/`boundElements` references.
+- **`connect_layers` owns the geometry, the model owns the grouping.** The
+  model reads the nodes' coordinates and says which ids form which layer; the
+  tool computes column and row spacing from the nodes' own size, moves them,
+  and creates one arrow per adjacent-layer pair. A complete graph is
+  unrepresentable in its arguments, because a prompt rule against it loses to
+  a conversation whose own history already drew one. Hand-drawn `freedraw`
+  blobs that are roughly round are re-created as ellipses first, keeping their
+  ids: `freedraw` cannot hold an arrow binding, so lines drawn to a blob come
+  loose the moment it is dragged. Arrowheads can be turned off, but the
+  element is always an arrow, since only arrows bind.
 - **`capture` has two brains.** When the turn's model has vision, the data URL
   is queued and delivered to the model as the next user image message (`detail:
   high`, "(canvas capture)"). When it does not, the client calls
@@ -88,7 +103,7 @@ All seven are implemented with the semantics below (see the schemas in
 2. Set the per-turn mode system prompt; append selection ids + bbox and the
    viewport (scroll/zoom) to the user message; trim to the message budget.
 3. Loop, at most 20 steps: call `/api/ai/chat` with the transcript and the
-   seven tool schemas; if the reply has `tool_calls`, execute each tool
+   eight tool schemas; if the reply has `tool_calls`, execute each tool
    (TOON/string results pass through; everything else is JSON), flush any
    queued capture images, and continue; otherwise return `{ reply, changed }`.
 4. If the user pressed Stop, the fetch aborts (AbortSignal), and the partial

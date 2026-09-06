@@ -15,7 +15,7 @@ relative to it, and every claim here is grounded in that code.
 | 01-architecture-overview.md | The two AI paths, the processes and data flow, the "browser canvas is authoritative" invariant |
 | 02-chat-panel-ui.md | The AI sidebar: chat / history / settings views, modes, per-chat canvases, key setup |
 | 03-protocol-and-api.md | HTTP routes, auth and CORS rules, the chat wire format, the `wireExcalidrawAI()` client contract |
-| 04-agent-runtime-tools.md | The persona, the modes, the seven tools and their semantics, the tool loop |
+| 04-agent-runtime-tools.md | The persona, the modes, the eight tools and their semantics, the tool loop |
 | 05-providers-and-model.md | Providers, the model allowlist, discovery, where the key lives |
 | 06-selection-and-context.md | How selection, bbox and viewport reach the model; tool fallbacks; the sketch working set |
 | 07-vision-and-diagrams.md | Refine, text-to-diagram, the output contract, describe, draft accept/reject |
@@ -41,11 +41,11 @@ plus an HTTP API. The AI is two paths over one canvas:
 1. **One-shot diagram paths** - Refine a selected sketch (or a text
    description) into a clean diagram in one vision-model call, shown as a
    draft you Accept or Reject.
-2. **The chat agent** - a tool-calling loop (seven tools:
+2. **The chat agent** - a tool-calling loop (eight tools:
    `query_elements`, `create_elements`, `update_elements`,
-   `delete_elements`, `create_diagram`, `set_view`, `capture`) that reads and
-   edits the live canvas, with your selection and viewport appended to every
-   message.
+   `delete_elements`, `connect_layers`, `create_diagram`, `set_view`,
+   `capture`) that reads and edits the live canvas, with your selection and
+   viewport appended to every message.
 
 The model brain is any OpenAI-compatible `/chat/completions` endpoint; the
 API key stays on the server. Every chat owns its own canvas, stored as plain

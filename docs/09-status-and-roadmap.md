@@ -18,7 +18,7 @@ order.
   context, marked image, captions as words, relative-coordinate skeleton),
   text -> diagram, and the draft lifecycle (Accept/Reject, one undo step).
   `/api/ai/describe` turns screenshots into words.
-- **The agent**: chat with seven canvas tools (04), per-turn mode prompts
+- **The agent**: chat with eight canvas tools (04), per-turn mode prompts
   (assistant / guide / tutor), a stop that aborts upstream and keeps the
   transcript clean, TOON-compressed queries, whole-turn transcript trimming,
   and one-step revert of the last turn.
@@ -34,7 +34,7 @@ order.
 
 ## What is verified
 
-- **94 offline tests** (`node bridge/test.mjs`), no key, no browser; host
+- **117 offline tests** (`node bridge/test.mjs`), no key, no browser; host
   builds clean.
 - **18 browser tests** (`node bridge/browser-test.mjs`, headless Chrome via
   puppeteer-core): the panel renders inside Excalidraw's own chrome and

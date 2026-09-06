@@ -528,10 +528,101 @@ export function wireExcalidrawAI({ excalidrawAPI, endpoint = "/api/ai/diagram", 
     return out;
   }
 
+  // connect_layers: the model picks which nodes form which layer, this does all
+  // the geometry. A complete graph is unrepresentable here - only layer i to
+  // layer i+1 exists - which is the point. Asked to wire scattered nodes
+  // "feed-forward", the model reliably talks itself into every-node-to-every-
+  // node-on-its-right, and a system-prompt rule against it loses to a chat
+  // whose own history already did it once.
+  function runConnectLayers(args) {
+    const layers = (args && Array.isArray(args.layers) ? args.layers : [])
+      .filter(function (l) { return Array.isArray(l) && l.length; });
+    if (layers.length < 2) return { error: "layers needs at least two groups of element ids" };
+
+    const ids = layers.flat();
+    const byId = new Map(sceneElements().map(function (e) { return [e.id, e]; }));
+    const missing = ids.filter(function (id) { return !byId.has(id); });
+    if (missing.length) return { error: "no such elements: " + missing.join(", ") };
+
+    // A hand-drawn blob becomes an ellipse over its own bounding box: the same
+    // rough look, but a bindable container. freedraw cannot hold an arrow
+    // binding, so lines drawn to a blob are loose geometry that stays put when
+    // the blob is dragged. Keeping the element's id means the layers passed in
+    // still address it. Long thin strokes are skipped - unlikely to be nodes.
+    const blobs = ids.map(function (id) { return byId.get(id); }).filter(function (e) {
+      const w = e.width || 0, h = e.height || 0;
+      return e.type === "freedraw" && w > 0 && h > 0 && w / h >= 0.5 && w / h <= 2;
+    });
+    if (blobs.length) {
+      const shaped = convertToExcalidrawElements(blobs.map(function (e) {
+        return {
+          type: "ellipse", id: e.id, x: e.x, y: e.y, width: e.width, height: e.height,
+          strokeColor: e.strokeColor, backgroundColor: e.backgroundColor,
+          strokeWidth: e.strokeWidth, fillStyle: e.fillStyle, roughness: e.roughness,
+        };
+      }), { regenerateIds: false });
+      const swap = new Map(shaped.map(function (e) { return [e.id, e]; }));
+      excalidrawAPI.updateScene({
+        elements: sceneElements().map(function (e) { return swap.get(e.id) || e; }),
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      });
+      swap.forEach(function (e, id) { byId.set(id, e); }); // layout below reads the ellipses
+    }
+
+    const nodes = ids.map(function (id) { return byId.get(id); });
+    const box = bboxOf(nodes);
+    if (!box) return { error: "those elements have no usable coordinates" };
+    const wide = Math.max.apply(null, nodes.map(function (e) { return e.width || 0; }));
+    const tall = Math.max.apply(null, nodes.map(function (e) { return e.height || 0; }));
+    // gaps scaled to the nodes themselves, so hand-drawn blobs and 140px boxes
+    // both come out readable instead of squeezed into the old bounding box
+    const colGap = wide * 2.5, rowGap = tall * 1.6;
+    const cy = box.y + box.height / 2;
+
+    const changes = [];
+    layers.forEach(function (layer, i) {
+      const x = box.x + i * colGap;
+      const top = cy - ((layer.length - 1) * rowGap) / 2;
+      layer.forEach(function (id, j) {
+        const e = byId.get(id);
+        changes.push({
+          id: id,
+          x: Math.round(x + (wide - (e.width || 0)) / 2),
+          y: Math.round(top + j * rowGap - (e.height || 0) / 2),
+        });
+      });
+    });
+    runUpdate({ changes: changes }); // arrange first: arrow geometry reads the new positions
+
+    // always an arrow, headless when asked for "plain lines": only arrows bind
+    // (isBindingElement narrows to ExcalidrawArrowElement), and a line element
+    // would look right but come loose the moment a node is dragged
+    const heads = !(args && args.arrowheads === false);
+    const specs = [];
+    for (let i = 0; i + 1 < layers.length; i++) {
+      layers[i].forEach(function (from) {
+        layers[i + 1].forEach(function (to) {
+          specs.push({
+            type: "arrow", start: from, end: to,
+            startArrowhead: null, endArrowhead: heads ? "arrow" : null,
+          });
+        });
+      });
+    }
+    const made = runCreate({ elements: specs });
+    return {
+      refined: blobs.length,
+      arranged: changes.length,
+      connected: (made.created || []).length,
+      layers: layers.map(function (l) { return l.length; }),
+    };
+  }
+
   function executeTool(name, args, turn) {
     if (name === "query_elements") return runQuery(args);
     if (name === "create_elements") return runCreate(args);
     if (name === "update_elements") return runUpdate(args);
+    if (name === "connect_layers") return runConnectLayers(args);
     if (name === "delete_elements") return runDelete(args);
     if (name === "create_diagram") return runCreateDiagram(args); // async
     if (name === "set_view") return runSetView(args);
