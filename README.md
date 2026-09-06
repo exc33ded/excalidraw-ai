@@ -1,17 +1,24 @@
 # excalidraw-ai
 
+[github.com/exc33ded/excalidraw-ai](https://github.com/exc33ded/excalidraw-ai) · MIT
+
 An AI agent inside Excalidraw. A chat sidebar that reads and edits the live
 canvas through tools, generates whole diagrams from text via mermaid, cleans up
 hand-drawn sketches with a vision model, and can act as an assistant, a
 planning guide, or a step-by-step tutor. Every conversation is a chat with a
 canvas of its own; the chat list is the hamburger in the sidebar header.
 
-Built on the `@excalidraw/excalidraw` npm package, not a fork. The product is
-`bridge/`; nothing else is required to run it.
+Built on the `@excalidraw/excalidraw` npm package rather than a fork of
+Excalidraw. The product is `bridge/`; nothing else is required to run it.
 
-    bridge/          the app: Node proxy server + Vite/React host + agent client
-    docs/            design notes, the Penecho reference study, and 09-handoff.md
-                     (start there: what is built, what is proven, what is next)
+The idea comes from [PenEcho](https://github.com/penecho/penecho), an AI
+agent system for Excalidraw, which is where the agent-owns-the-canvas model
+and the sketch-to-diagram vision loop come from. This is an independent
+implementation with its own tool loop, storage, providers, and UI.
+
+    bridge/          the app: Node API server + Vite/React host + agent client
+    docs/            architecture, protocol, and roadmap docs - start at
+                     docs/README.md (01 architecture, 09 status & roadmap)
 
 ## Prerequisites
 
@@ -24,12 +31,13 @@ Built on the `@excalidraw/excalidraw` npm package, not a fork. The product is
 
     npx excalidraw-ai
 
-One process, one port, opens a browser at http://127.0.0.1:8787. You do not
-need a key to start it — click the gear in the AI panel, pick a provider and
-paste one.
+It runs as one process on one port and opens a browser at
+http://127.0.0.1:8787. You do not need a key to start it: click the gear in
+the AI panel, pick a provider and paste one.
 
-Your chats live in `~/.excalidraw-ai/chats/`, one directory per chat (plain
-JSON, no database, no service). Set `AI_DATA_DIR` to keep them elsewhere.
+Your chats live in `~/.excalidraw-ai/chats/`, one directory per chat, as plain
+JSON with no database or service behind it. Set `AI_DATA_DIR` to keep them
+elsewhere.
 
 ## Run from source
 
@@ -52,11 +60,3 @@ list by hand instead, set `AI_MODELS` in `bridge/.env`
     cd bridge
     node test.mjs                # offline, no key
     node browser-test.mjs        # headless Chrome, needs both servers and a key
-
-## Reference clones (optional)
-
-The docs cite two upstream repos by path. They are not part of this repo;
-clone them beside `bridge/` if you want to follow the references:
-
-    git clone https://github.com/excalidraw/excalidraw excalidraw
-    git clone https://github.com/penecho/penecho penecho   # docs reference v1.2.0
